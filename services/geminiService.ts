@@ -1,24 +1,68 @@
+
+
 import { GoogleGenAI, GenerateContentResponse, Chat, Type } from "@google/genai";
 import { InteractiveContent, UserAnswer, FeedbackItem, MultipleChoiceQuestionBlock, OpenEndedQuestionBlock, InteractiveBlock, Chapter, PageText, TrueFalseQuestionBlock, FillInTheBlankQuestionBlock, Lesson, SearchResult, SearchFilter, AiCorrection, AiBookCategory, SmartSearchResult } from '../types';
 
 let ai: GoogleGenAI | null = null;
-let aiInitializationError: Error | null = null;
+let currentApiKey: string | null = null;
 
-// Immediately try to initialize.
-try {
-    // As per guidelines, API key must come from environment variables.
-    ai = new GoogleGenAI({ apiKey: process.env.API_KEY });
-} catch (e: any) {
-    aiInitializationError = e;
-    console.error("FATAL: GoogleGenAI could not be initialized. Ensure the API_KEY environment variable is set.", e);
-}
+// Function to initialize or re-initialize the AI client
+const initializeAi = () => {
+    // Priority: environment variable > local storage
+    const keyFromEnv = process.env.API_KEY;
+    const keyFromStorage = localStorage.getItem('user_provided_api_key');
+    
+    const keyToUse = keyFromEnv || keyFromStorage;
 
-const getAi = (): GoogleGenAI => {
-    if (aiInitializationError) {
-        throw new Error(`AI service failed to initialize: ${aiInitializationError.message}`);
+    // Re-initialize only if the key has changed or was not set before
+    if (keyToUse && keyToUse !== currentApiKey) {
+        try {
+            ai = new GoogleGenAI({ apiKey: keyToUse });
+            currentApiKey = keyToUse;
+        } catch (e) {
+            console.error("Failed to initialize GoogleGenAI with the provided key:", e);
+            ai = null;
+            currentApiKey = null;
+            // Also remove the bad key from storage to prevent re-initialization loops
+            if (keyFromStorage === keyToUse) {
+                localStorage.removeItem('user_provided_api_key');
+            }
+        }
+    } else if (!keyToUse) {
+        // If no key is available, ensure ai is null
+        ai = null;
+        currentApiKey = null;
     }
+};
+
+// Initialize on module load
+initializeAi();
+
+// Export a function for the UI to set the key
+export const setUserApiKey = (key: string) => {
+    localStorage.setItem('user_provided_api_key', key);
+    initializeAi(); // Re-initialize with the new key
+};
+
+// Export a function to check if a key is available
+export const hasValidApiKey = (): boolean => {
+    // Re-check from storage in case it was set in another tab
+    const keyFromStorage = localStorage.getItem('user_provided_api_key');
+    if (keyFromStorage && keyFromStorage !== currentApiKey) {
+        initializeAi();
+    }
+    return !!currentApiKey;
+};
+
+// Main getter for the AI instance, used by all other service functions
+const getAi = (): GoogleGenAI => {
     if (!ai) {
-        throw new Error("AI service is not initialized. Ensure the API_KEY environment variable is set.");
+        // Attempt to re-initialize in case a key was set after a previous failure
+        initializeAi();
+        // If it's still null, throw a specific, catchable error
+        if (!ai) {
+            throw new Error("API Key not provided. Please set it via the API Key modal.");
+        }
     }
     return ai;
 };
@@ -111,12 +155,14 @@ export const proofreadSinglePageText = async (text: string): Promise<string> => 
         return text;
     }
     const prompt = `
-        You are a proofreading agent. Your task is to review the following text and correct any spelling or grammatical errors.
-        Text:
+        أنت وكيل تدقيق لغوي. مهمتك هي مراجعة النص التالي وتصحيح أي أخطاء إmlائية أو نحوية.
+        مهم جداً: تعامل مع النص بلغته الأصلية ولا تقم بترجمته.
+
+        النص:
         ---
         ${text}
         ---
-        Required: Return only the corrected text, with no preambles, titles, or markdown formatting.
+        المطلوب: أعد النص المصحح فقط، بدون أي مقدمات أو عناوين أو markdown.
     `;
 
     const apiCall = async () => {
@@ -135,46 +181,100 @@ export const proofreadSinglePageText = async (text: string): Promise<string> => 
     }
 };
 
+export const proofreadFullBook = async (pages: PageText[]): Promise<PageText[] | null> => {
+    const currentAi = getAi();
+    if (!pages || pages.length === 0) {
+        return pages;
+    }
+
+    // Combine all pages into a single string with separators
+    const fullText = pages.map(p => `--- PAGE ${p.pageNumber} ---\n${p.text}`).join('\n\n');
+
+    const prompt = `
+        أنت وكيل تدقيق لغوي خبير. مهمتك هي مراجعة النص التالي، الذي تم تقسيمه حسب أرقام الصفحات، وتصحيح أي أخطاء إملائية أو نحوية.
+        مهم جداً: حافظ على بنية النص المقسمة حسب الصفحات باستخدام نفس الفواصل (--- PAGE X ---).
+        لا تقم بترجمة النص، بل قم بتصحيحه بلغته الأصلية.
+
+        النص للتصحيح:
+        ---
+        ${fullText}
+        ---
+
+        المطلوب: أعد النص الكامل والمصحح، مع الحفاظ على فواصل الصفحات كما هي، بدون أي مقدمات أو عناوين أو markdown.
+    `;
+
+    const apiCall = async () => {
+        const response: GenerateContentResponse = await currentAi.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+        });
+        
+        const correctedFullText = response.text;
+        if (!correctedFullText) return null;
+
+        // Fallback: If parsing fails, we might have lost pages. Let's do a sanity check.
+        // Let's iterate through original pages and find their correction.
+        const updatedPages = pages.map(originalPage => {
+            const regex = new RegExp(`--- PAGE ${originalPage.pageNumber} ---\n([\\s\\S]*?)(?=--- PAGE|$)`);
+            const match = correctedFullText.match(regex);
+            return {
+                ...originalPage,
+                text: match && match[1] ? match[1].trim() : originalPage.text, // Keep original if not found
+            };
+        });
+        
+        return updatedPages;
+    };
+
+    try {
+        return await callApiWithRetry(apiCall);
+    } catch (error) {
+        console.error("Error proofreading full book:", error);
+        return null;
+    }
+};
+
 export const summarizeChapterText = async (chapterText: string, style?: string): Promise<string> => {
     const currentAi = getAi();
     if (!chapterText || !chapterText.trim()) {
-        return "No text to summarize.";
+        return "لا يوجد نص لتلخيصه.";
     }
 
     const wordCount = chapterText.trim().split(/\s+/).length;
     const targetWordCount = Math.round(wordCount * 0.25);
 
     const styleInstruction = style ? `
-**Step 2.5: Apply Requested Style**
-In addition to the preceding rules, you must apply the following style to the summary: "${style}". This directive is mandatory and takes precedence in how the content is presented.
+**الخطوة 2.5: تطبيق الأسلوب المطلوب**
+بالإضافة إلى القواعد السابقة، يجب عليك تطبيق الأسلوب التالي على الملخص: "${style}". هذا التوجيه إلزامي ويعطي الأولوية لكيفية عرض المحتوى.
 ` : '';
 
     const prompt = `
-        You are a high-fidelity summarization expert. Your job is to follow the steps below precisely to create a detailed summary of a book chapter.
+        أنت خبير تلخيص فائق الدقة. مهمتك هي اتباع الخطوات التالية بدقة لإنشاء ملخص مفصل لفصل من كتاب.
 
-        **Step 1: Confirm Word Count**
-        The full text of the chapter is provided below. First, count the words in this text to verify. Our calculated word count is ${wordCount} words.
+        **الخطوة 1: تأكيد عدد الكلمات**
+        النص الكامل للفصل موجود أدناه. أولاً، قم بعدّ عدد الكلمات في هذا النص للتأكد. عدد الكلمات المحسوب لدينا هو ${wordCount} كلمة.
 
-        **Step 2: Determine Summary Length**
-        Your task is to create a detailed summary that is exactly **one-quarter (25%)** the length of the original text. Based on the original word count, your summary should be approximately **${targetWordCount} words**. Adherence to this length is mandatory.
+        **الخطوة 2: تحديد حجم الملخص**
+        مهمتك هي إنشاء ملخص مفصل يكون طوله **ربع (25%)** النص الأصلي بالضبط. بناءً على عدد الكلمات الأصلي، يجب أن يكون الملخص الخاص بك حوالي **${targetWordCount} كلمة**. الالتزام بهذا الحجم إلزامي.
         
         ${styleInstruction}
 
-        **Full Chapter Text:**
+        **النص الكامل للفصل:**
         ---
         ${chapterText}
         ---
 
-        **Strict and Mandatory Rules for the Summary:**
-        1.  **Focus on Detail:** Do not write a brief overview. The summary must be a condensed version of the original text, retaining all important details and ideas.
-        2.  **Adhere to Length:** Stick to the target summary length (around ${targetWordCount} words) to ensure detail.
-        3.  **No Introductions:** Begin the summary directly. Do not use phrases like "This text summarizes...".
-        4.  **Preserve Style:** Maintain the same tone and style as the original author (unless a different style is specified in Step 2.5).
-        5.  **No Conclusions:** Do not add any conclusions that were not in the original text.
-        6.  **Comprehensiveness:** Extract all key ideas, arguments, evidence, and important examples.
+        **قواعد صارمة وإلزامية للملخص:**
+        1.  **التركيز على التفاصيل:** لا تكتب نبذة مختصرة. يجب أن يكون الملخص نسخة مكثفة من النص الأصلي، تحتفظ بجميع التفاصيل والأفكار الهامة.
+        2.  **الالتزام بالحجم:** التزم بحجم الملخص المستهدف (حوالي ${targetWordCount} كلمة) لضمان التفصيل.
+        3.  **لا للمقدمات:** ابدأ بالملخص مباشرة. لا تستخدم عبارات مثل "هذا النص يلخص...".
+        4.  **الحفاظ على الأسلوب:** حافظ على نفس نبرة وأسلوب الكاتب الأصلي (ما لم يحدد أسلوب مختلف في الخطوة 2.5).
+        5.  **لا للاستنتاجات:** لا تضف أي استنتاجات لم تكن في النص الأصلي.
+        6.  **الشمولية:** استخلص جميع الأفكار الرئيسية، والحجج، والأدلة، والأمثلة الهامة.
+        7.  **الحفاظ على اللغة الأصلية:** تعامل مع النص بلغته الأصلية ولا تترجمه إطلاقاً.
 
-        **Required:**
-        Return only the detailed summary as plain text, with no titles or markdown formatting, strictly adhering to the instructions above.
+        **المطلوب:**
+        أعد الملخص المفصل فقط، كنص نقي بدون أي عناوين أو تنسيق markdown، مع الالتزام الصارم بالتعليمات المذكورة أعلاه.
     `;
     
     const apiCall = async () => {
@@ -182,14 +282,14 @@ In addition to the preceding rules, you must apply the following style to the su
             model: "gemini-2.5-flash",
             contents: prompt,
         });
-        return response.text?.trim() || "Failed to generate summary.";
+        return response.text?.trim() || "فشل إنشاء الملخص.";
     };
     
     try {
          return await callApiWithRetry(apiCall);
     } catch (error) {
         console.error("Error summarizing chapter text after retries:", error);
-        return "Sorry, an error occurred while trying to generate the summary.";
+        return "عذرًا، حدث خطأ أثناء محاولة إنشاء الملخص.";
     }
 };
 
@@ -203,24 +303,25 @@ export const analyzeDocumentStructure = async (pages: PageText[]): Promise<Chapt
     const totalPages = pages.length;
 
     const prompt = `
-        You are an intelligent assistant specializing in document structure analysis. Your task is to examine the following text extracted from a file and identify only its high-level structural components, like parts or chapters.
+        أنت مساعد ذكي متخصص في تحليل بنية المستندات. مهمتك هي فحص النص التالي المستخرج من ملف PDF وتحديد مكوناته الهيكلية عالية المستوى فقط، مثل الأجزاء أو الفصول.
 
-        Extracted text:
+        النص المستخرج:
         ---
         ${textForAnalysis}
         ---
 
-        The total number of pages in the document is: ${totalPages}.
+        إجمالي عدد الصفحات في المستند هو: ${totalPages}.
 
-        **Requirements:**
-        1.  Identify the main structural components (e.g., Chapters, Parts) in the document.
-        2.  Do not break these components down into sub-lessons or smaller sections at this stage.
-        3.  Estimate the start and end page numbers for each main component.
-        4.  The last component must extend to the end of the document (page ${totalPages}).
-        5.  If you cannot identify clear components, create a single component spanning the entire document.
+        **المتطلبات:**
+        1.  حدد المكونات الهيكلية الرئيسية (مثل الفصول أو الأجزاء) في المستند.
+        2.  لا تقم بتقسيم هذه المكونات إلى دروس فرعية أو أقسام أصغر في هذه المرحلة.
+        3.  قدّر أرقام صفحات البداية والنهاية لكل مكون رئيسي.
+        4.  يجب أن يغطي المكون الأخير حتى نهاية المستند (صفحة ${totalPages}).
+        5.  إذا لم تتمكن من تحديد مكونات واضحة، فقم بإنشاء مكون واحد يغطي المستند بأكمله.
+        6.  **الحفاظ على اللغة:** يجب أن تكون عناوين المكونات بنفس لغة المستند الأصلي. لا تترجمها.
 
-        Very Important: You must respond with only a single, valid JSON object that strictly follows the provided schema. Do not include any text, markdown, or explanations before or after the JSON object. Double-check for common errors like trailing commas or missing commas between objects.
-        The response should be an array of component objects, following this exact schema:
+        مهم جداً: يجب عليك الرد فقط بكائن JSON صالح واحد يتبع المخطط المقدم بدقة. لا تقم بتضمين أي نص أو markdown أو شروحات قبل أو بعد كائن JSON. تحقق مرة أخرى من الأخطاء الشائعة مثل الفواصل الزائدة أو الفواصل المفقودة بين الكائنات.
+        يجب أن يكون الرد عبارة عن مصفوفة من كائنات المكونات، تتبع هذا المخطط الدقيق:
         [
           {
             "title": "string",
@@ -253,36 +354,38 @@ export const analyzeDocumentStructure = async (pages: PageText[]): Promise<Chapt
             return chaptersWithIds.filter(c => c.startPage <= totalPages && c.startPage > 0 && c.endPage >= c.startPage);
         }
         
-        return [{ id: generateUniqueId(), title: `Full Document`, startPage: 1, endPage: totalPages }];
+        return [{ id: generateUniqueId(), title: `المستند كاملاً`, startPage: 1, endPage: totalPages }];
     };
     
     try {
         return await callApiWithRetry(apiCall);
     } catch(error) {
         console.error("Error analyzing PDF for structure after retries:", error);
-        return [{ id: generateUniqueId(), title: `Full Document`, startPage: 1, endPage: totalPages }];
+        return [{ id: generateUniqueId(), title: `المستند كاملاً`, startPage: 1, endPage: totalPages }];
     }
 };
 
 export const analyzeChapterForLessons = async (chapterText: string, chapter: Chapter): Promise<Lesson[] | null> => {
     const currentAi = getAi();
     const prompt = `
-        You are an expert in curriculum design. The following text is from a component in a book titled "${chapter.title}", which spans from page ${chapter.startPage} to ${chapter.endPage}.
-        Your task is to break this text down into smaller, logical educational "lessons".
+        أنت خبير في تصميم المناهج. النص التالي مأخوذ من مكون في كتاب بعنوان "${chapter.title}"، والذي يمتد من الصفحة ${chapter.startPage} إلى ${chapter.endPage}.
+        مهمتك هي تقسيم هذا النص إلى "دروس" تعليمية أصغر ومنطقية. وشرحها شرح واف.
 
-        Text for analysis:
+        النص للمعاينة:
         ---
         ${chapterText.substring(0, 50000)}...
         ---
 
-        **Requirements:**
-        1.  Identify logical lessons within the text.
-        2.  For each lesson, provide a descriptive title.
-        3.  Estimate the start and end pages for each lesson. These pages must be within the original component's range of [${chapter.startPage}, ${chapter.endPage}].
-        4.  If you cannot identify any clear lessons, return an empty array.
-        
-        Very Important: You must respond with only a valid JSON object. Do not include any text, markdown, or explanations before or after the JSON object.
-        The response should be an array of lesson objects with this schema:
+        **المتطلبات:**
+        1.  حدد الدروس المنطقية داخل النص.
+        2.  لكل درس، قدم عنوانًا وصفيًا.
+        3.  قدّر صفحات البداية والنهاية لكل درس. يجب أن تكون هذه الصفحات ضمن نطاق المكون الأصلي [${chapter.startPage}, ${chapter.endPage}].
+        4.  إذا لم تتمكن من تحديد أي دروس واضحة، أعد مصفوفة فارغة.
+        5.  ضع الفقرة المأخوذه من النص بلون خط أخضر ثم اشرحها بخط لونه أبيض
+        6.  **الحفاظ على اللغة:** يجب أن تكون عناوين الدروس بنفس لغة المستند الأصلي. لا تترجمها.
+
+        مهم جداً: يجب عليك الرد فقط بكائن JSON صالح. لا تقم بتضمين أي نص أو markdown أو شروحات قبل أو بعد كائن JSON.
+        يجب أن يكون الرد مصفوفة من كائنات الدروس بهذا المخطط:
         [
           {
             "title": "string",
@@ -327,23 +430,24 @@ export const generateInteractiveLesson = async (pdfText: string, lessonPages: Pa
     const limitedText = lessonTextContent.length > charLimit ? lessonTextContent.substring(0, charLimit) + "..." : lessonTextContent;
 
     const prompt = `
-        You are a highly intelligent educational expert. Your task is to provide a **comprehensive and detailed explanation** of the following text from a document, turning it into an integrated learning module.
+        أنت خبير تعليمي فائق الذكاء ومهمتك هي تقديم **شرح وافٍ ومفصل** للنص التالي من مستند، وتحويله إلى وحدة تعليمية شاملة باللغة العربية.
 
-        Extracted text from the document:
+        النص المستخرج من المستند:
         ---
         ${limitedText}
         ---
 
-        **Core Rules (Must be followed strictly):**
-        1.  **Comprehensive Explanation (No Summarizing):** Explain the content in full detail. **Do not summarize the content at all**. The goal is to deepen understanding, not brevity.
-        2.  **Adherence to Source:** All explanations must be strictly based on the provided text from the document. The only exception is the mandatory examples required below.
-        3.  **Include Practical Examples:** If the topic is related to **Mathematics, Physics, Chemistry, or Statistics**, it is very important to include a special section titled **"Illustrative Examples"**. This section must contain **exactly two (2)** practical, step-by-step solved examples to clarify theoretical concepts. These examples should be your creation to enhance the explanation.
-        4.  **No Question Generation:** Do not create any test questions of any kind at this stage. Focus solely on the explanatory content.
-        5.  **No Images:** Do not include any type of images or diagrams. Focus only on textual and mathematical explanations.
+        **القواعد الأساسية (يجب الالتزام بها بشكل صارم):**
+        1.  **شرح شامل (لا للتلخيص):** اشرح المحتوى بالتفصيل الكامل. **لا تقم بتلخيص المحتوى إطلاقًا**. يجب أن يكون الهدف هو تعميق الفهم وليس الإيجاز.
+        2.  **الالتزام بالمصدر:** يجب أن تستند جميع الشروحات بشكل صارم إلى النص المقدم من المستند. الاستثناء الوحيد هو الأمثلة الإلزامية المطلوبة أدناه.
+        3.  **تضمين الأمثلة العملية:** إذا كان الموضوع يتعلق بـ **الرياضيات، الفيزياء، الكيمياء، أو الإحصاء**، فمن المهم جدًا تضمين قسم خاص بعنوان **"أمثلة للتوضيح"**. يجب أن يحتوي هذا القسم على **مثالين (2) فقط** عمليين ومحلولين خطوة بخطوة لتوضيح المفاهيم النظرية. هذه الأمثلة يجب أن تكون من عندك لتعزيز الشرح.
+        4.  **عدم إنشاء أسئلة:** لا تقم بإنشاء أي أسئلة اختبار من أي نوع في هذه المرحلة. ركز فقط على محتوى الشرح.
+        5.  **لا للصور:** لا تقم بتضمين أي نوع من كتل الصور أو الرسوم البيانية. ركز فقط على الشرح النصي والرياضي.
+        6.  **الحفاظ على اللغة:** قم بشرح المحتوى بنفس لغة النص الأصلي. لا تترجم أي شيء.
 
-        **Output Format (JSON):**
-        Very Important: You must respond with only a single, valid JSON object that strictly follows the provided schema. Do not include any text, markdown, or explanations before or after the JSON object.
-        The JSON object must follow this schema exactly:
+        **صيغة الإخراج (JSON):**
+        مهم جداً: يجب عليك الرد فقط بكائن JSON صالح واحد يتبع المخطط المقدم بدقة. لا تقم بتضمين أي نص أو markdown أو شروحات قبل أو بعد كائن JSON.
+        يجب أن يتبع كائن JSON هذا المخطط الدقيق:
         {
           "title": "string",
           "content": [
@@ -387,20 +491,21 @@ export const generateInteractiveLesson = async (pdfText: string, lessonPages: Pa
 export const generateInitialQuestions = async (lessonText: string): Promise<InteractiveBlock[] | null> => {
     const currentAi = getAi();
     const prompt = `
-        You are an expert in creating educational assessments. Your task is to create questions based on the following lesson text.
+        أنت خبير في إنشاء التقييمات التعليمية. مهمتك هي إنشاء أسئلة بناءً على نص الدرس التالي.
 
-        Lesson Text:
+        نص الدرس:
         ---
         ${lessonText.substring(0, 25000)}
         ---
 
-        **Requirements:**
-        1.  Create a comprehensive and diverse test of **50 questions** based on the lesson text.
-        2.  Use different types of questions (multiple choice, true/false, fill-in-the-blank, open-ended) to test understanding deeply.
-        3.  Ensure each object in the array is complete and follows the schema strictly. Check that all property names like 'question', 'options', and 'correctAnswerIndex' are spelled correctly and enclosed in double quotes.
+        **المتطلبات:**
+        1.  أنشئ اختبارًا شاملاً ومتنوعًا مكونًا من **50 سؤالاً** بناءً على نص الدرس.
+        2.  استخدم أنواع أسئلة مختلفة (اختيار من متعدد، صح وخطأ، إكمال الفراغ، سؤال مفتوح) لاختبار الفهم بعمق.
+        3.  تأكد من أن كل كائن في المصفوفة مكتمل ويتبع المخطط بدقة. تحقق من أن جميع أسماء الخصائص مثل 'question' و 'options' و 'correctAnswerIndex' مكتوبة بشكل صحيح ومحاطة بعلامات اقتباس مزدوجة.
+        4.  **لغة الأسئلة:** يجب أن تكون جميع الأسئلة والخيارات بنفس لغة نص الدرس. لا تقم بالترجمة.
 
-        **Output Format (JSON):**
-        Very Important: You must respond with only a valid JSON object. The response must contain an array of question objects that follow one of the following schemas:
+        **صيغة الإخراج (JSON):**
+        مهم جداً: يجب عليك الرد فقط بكائن JSON صالح. يجب أن يحتوي الرد على مصفوفة من كائنات الأسئلة التي تتبع أحد المخططات التالية:
         [
           { "type": "multiple_choice_question", "question": "string", "options": ["string"], "correctAnswerIndex": number },
           { "type": "true_false_question", "question": "string", "correctAnswer": boolean },
@@ -436,6 +541,52 @@ export const generateInitialQuestions = async (lessonText: string): Promise<Inte
     return null; // Return null after all retries fail
 };
 
+export const generateQuestionsForPageText = async (pageText: string): Promise<InteractiveBlock[] | null> => {
+    const currentAi = getAi();
+    const prompt = `
+        You are an expert at creating educational assessments. Your task is to generate 10 diverse questions based on the following page text.
+
+        Page Text:
+        ---
+        ${pageText.substring(0, 15000)}
+        ---
+
+        **Requirements:**
+        1.  Create a short quiz of **10 diverse questions**.
+        2.  Use different question types (multiple_choice_question, true_false_question, fill_in_the_blank_question, open_ended_question).
+        3.  All questions and options must be in the same language as the page text. Do not translate.
+
+        **Output Format (JSON):**
+        IMPORTANT: You must respond with ONLY a single valid JSON object. The response must be an array of question objects following one of the schemas below:
+        [
+          { "type": "multiple_choice_question", "question": "string", "options": ["string"], "correctAnswerIndex": number },
+          { "type": "true_false_question", "question": "string", "correctAnswer": boolean },
+          { "type": "fill_in_the_blank_question", "questionParts": ["string"], "correctAnswers": ["string"] },
+          { "type": "open_ended_question", "question": "string" }
+        ]
+    `;
+    
+    const apiCall = async () => {
+        const response: GenerateContentResponse = await currentAi.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+            config: {
+                responseMimeType: "application/json",
+            }
+        });
+
+        const rawBlocks = parseJsonResponse<Omit<InteractiveBlock, 'id'>[]>(response.text);
+        return rawBlocks ? assignIdsToBlocks(rawBlocks) : null;
+    };
+
+    try {
+        return await callApiWithRetry(apiCall);
+    } catch (error) {
+        console.error("Error generating questions for page text:", error);
+        return null;
+    }
+};
+
 
 export const getFeedbackOnAnswers = async (
     userAnswers: UserAnswer[],
@@ -460,16 +611,16 @@ export const getFeedbackOnAnswers = async (
             case 'open_ended_question':
                 questionText = questionBlock.question;
                 userAnswerText = String(ua.answer);
-                correctAnswerText = "This is an open-ended question. Evaluate the answer's logic and relevance.";
+                correctAnswerText = "هذا سؤال مفتوح، قم بتقييم مدى منطقية الإجابة وارتباطها بالسؤال.";
                 break;
             case 'true_false_question':
                 questionText = questionBlock.question;
-                userAnswerText = ua.answer ? 'True' : 'False';
-                correctAnswerText = questionBlock.correctAnswer ? 'True' : 'False';
+                userAnswerText = ua.answer ? 'صحيح' : 'خطأ';
+                correctAnswerText = questionBlock.correctAnswer ? 'صحيح' : 'خطأ';
                 break;
             case 'fill_in_the_blank_question':
-                questionText = questionBlock.questionParts.join(' [blank] ');
-                userAnswerText = Array.isArray(ua.answer) ? ua.answer.map(a => a || 'empty').join(', ') : 'N/A';
+                questionText = questionBlock.questionParts.join(' [فراغ] ');
+                userAnswerText = Array.isArray(ua.answer) ? ua.answer.map(a => a || 'فارغ').join(', ') : 'N/A';
                 correctAnswerText = questionBlock.correctAnswers.join(', ');
                 break;
         }
@@ -484,21 +635,23 @@ export const getFeedbackOnAnswers = async (
     if (qaPairsForAI.length === 0) return [];
 
     const prompt = `
-        You are an expert teacher. Your task is to evaluate a student's answers and provide constructive feedback.
+        ملاحظة هامة: يجب أن تكون اللغة المستخدمة في حقل "explanation" هي اللغة العربية كما هو مطلوب. ومع ذلك، عند الإشارة إلى السؤال أو الإجابة الصحيحة ضمن الشرح، حافظ على لغتها الأصلية ولا تترجمها.
 
-        The questions and the student's answers, with correct answers for comparison:
+        أنت معلم خبير. مهمتك هي تقييم إجابات الطالب وتقديم ملاحظات بناءة باللغة العربية.
+
+        الأسئلة وإجابات الطالب، مع الإجابات الصحيحة للمقارنة:
         ---
         ${JSON.stringify(qaPairsForAI, null, 2)}
         ---
         
-        **Strict Requirements:**
-        1.  For each item, compare the \`userAnswer\` with the \`correctAnswer\`.
-        2.  Fill the \`isCorrect\` field with \`true\` if the answer is correct, and \`false\` if it is wrong.
-        3.  In the \`explanation\` field:
-            - If the answer is **correct**, provide simple encouragement like "Great job!".
-            - If the answer is **incorrect**, the explanation must start by stating the answer is incorrect, **then you must clearly state the correct answer**.
+        **متطلبات صارمة:**
+        1.  لكل عنصر، قارن \`userAnswer\` مع \`correctAnswer\`.
+        2.  املأ حقل \`isCorrect\` بـ \`true\` إذا كانت صحيحة، و \`false\` إذا كانت خاطئة.
+        3.  في حقل \`explanation\`:
+            - إذا كانت الإجابة **صحيحة**، قدم تشجيعًا بسيطًا مثل "إجابة رائعة!".
+            - إذا كانت الإجابة **خاطئة**، يجب أن تبدأ الشرح بذكر أن الإجابة غير صحيحة، **ثم يجب أن تذكر الإجابة الصحيحة بوضوح**.
 
-        Very Important: You must respond with only a valid JSON object. The response must be an array of objects, following this schema exactly, ensuring you return the same \`questionId\` provided for each item:
+        مهم جداً: يجب عليك الرد فقط بكائن JSON صالح. يجب أن يكون الرد عبارة عن مصفوفة من الكائنات، تتبع هذا المخطط الدقيق، مع التأكد من إعادة نفس \`questionId\` الذي تم تزويدك به لكل عنصر:
         [
           {
             "questionId": "string",
@@ -546,19 +699,21 @@ export const getAiCorrections = async (
     if (incorrectAnswers.length === 0) return [];
 
     const prompt = `
-        You are an expert and empathetic teacher. You've been asked to review a student's incorrect answers and provide a detailed, constructive correction for each.
+        ملاحظة هامة: يجب أن تكون اللغة المستخدمة في حقل "correction" هي اللغة العربية كما هو مطلوب. ومع ذلك، عند الإشارة إلى السؤال أو الإجابة الصحيحة ضمن الشرح، حافظ على لغتها الأصلية ولا تترجمها.
+        
+        أنت معلم خبير ومتفهم. طُلب منك مراجعة إجابات طالب كانت غير صحيحة وتقديم تصحيح مفصل وبناء لكل منها باللغة العربية.
 
-        The incorrect questions and answers:
+        الأسئلة والإجابات غير الصحيحة:
         ---
         ${JSON.stringify(incorrectAnswers, null, 2)}
         ---
         
-        **Requirements:**
-        1.  For each question, clearly explain **why the student's answer was incorrect**.
-        2.  Then, provide the **correct answer with a full yet simple explanation** of the logic behind it.
-        3.  Keep the explanation easy to understand and encouraging.
+        **المتطلبات:**
+        1.  لكل سؤال، اشرح بوضوح **لماذا كانت إجابة الطالب خاطئة**.
+        2.  بعد ذلك، قدم **الإجابة الصحيحة مع شرح كامل ومبسط للمنطق** وراءها.
+        3.  اجعل الشرح سهل الفهم ومشجعًا.
         
-        Very Important: You must respond with only a valid JSON object. The response must be an array of objects, following this schema exactly, ensuring you return the same \`questionId\` provided for each item:
+        مهم جداً: يجب عليك الرد فقط بكائن JSON صالح. يجب أن يكون الرد عبارة عن مصفوفة من الكائنات، تتبع هذا المخطط الدقيق، مع التأكد من إعادة نفس \`questionId\` الذي تم تزويدك به لكل عنصر:
         [
           {
             "questionId": "string",
@@ -608,25 +763,26 @@ export const generateMoreQuestions = async (
     }).filter(Boolean).join('\n - ');
 
     const prompt = `
-        You are an expert in curriculum design. Your task is to generate additional questions based on the following lesson text.
+        أنت خبير في تصميم المناهج. مهمتك هي إنشاء أسئلة إضافية بناءً على نص الدرس التالي.
 
-        Lesson Text:
+        نص الدرس:
         ---
         ${lessonText.substring(0, 25000)}
         ---
 
-        Existing Questions (avoid repeating these):
+        الأسئلة الموجودة حاليًا (تجنب تكرارها):
         ---
         - ${existingQuestionPrompts}
         ---
 
-        **Requirements:**
-        1.  Generate **10 new and diverse questions**.
-        2.  The questions must be **different** from the existing ones.
-        3.  Use various question types.
+        **المتطلبات:**
+        1.  أنشئ **10 أسئلة جديدة ومتنوعة**.
+        2.  يجب أن تكون الأسئلة **مختلفة** عن الأسئلة الموجودة.
+        3.  استخدم أنواع أسئلة مختلفة.
+        4.  **لغة الأسئلة:** يجب أن تكون جميع الأسئلة والخيارات الجديدة بنفس لغة نص الدرس. لا تقم بالترجمة.
 
-        **Output Format (JSON):**
-        Very Important: Respond with only a valid JSON object. The response must contain an array of question objects.
+        **صيغة الإخراج (JSON):**
+        مهم جداً: يجب عليك الرد فقط بكائن JSON صالح. يجب أن يحتوي الرد على مصفوفة من كائنات الأسئلة.
     `;
 
     const apiCall = async () => {
@@ -650,18 +806,18 @@ export const generateMoreQuestions = async (
 
 export const getDeeperExplanation = async (text: string): Promise<string | null> => {
     const currentAi = getAi();
-    const prompt = `You are an expert teacher who specializes in simplifying complex concepts. You have been asked to provide a more detailed and simpler explanation of the following concept for a student who did not understand it well the first time.
+    const prompt = `أنت معلم خبير ومتخصص في تبسيط المفاهيم المعقدة. طُلب منك تقديم شرح أكثر تفصيلاً وبساطة للمفهوم التالي لطالب لم يفهمه جيدًا من المرة الأولى.
 
-Concept to be explained:
+المفهوم المطلوب شرحه:
 ---
 "${text}"
 ---
 
-**Requirements:**
-1.  Re-explain the concept in simple, clear language.
-2.  Use analogies or real-life examples to make the idea more accessible.
-3.  Break down the explanation into small, easy-to-follow points if possible.
-4.  Your response should be only the explanation, without any introductions or extra phrases.
+**المتطلبات:**
+1.  **الحفاظ على اللغة:** أعد شرح المفهوم بنفس لغة النص الأصلي. لا تترجمه. اجعل الشرح بسيطًا وواضحًا.
+2.  استخدم التشبيهات أو الأمثلة الواقعية لتقريب الفكرة.
+3.  قسم الشرح إلى نقاط صغيرة وسهلة المتابعة إذا أمكن.
+4.  يجب أن يكون ردك هو الشرح فقط، بدون أي مقدمات أو عبارات إضافية.
 `;
 
     const apiCall = async () => {
@@ -676,7 +832,7 @@ Concept to be explained:
         return await callApiWithRetry(apiCall);
     } catch (error) {
         console.error("Error getting deeper explanation after retries:", error);
-        return "Sorry, an error occurred while trying to get an additional explanation.";
+        return "عذرًا، حدث خطأ أثناء محاولة الحصول على شرح إضافي.";
     }
 };
 
@@ -686,30 +842,30 @@ export const searchForMaterials = async (query: string, filter: SearchFilter): P
     let filterInstruction = '';
     switch (filter) {
         case 'video':
-            filterInstruction = 'Focus your search primarily on YouTube.';
+            filterInstruction = 'ركز بحثك بشكل أساسي على منصة يوتيوب.';
             break;
         case 'sites':
-            filterInstruction = 'Exclude YouTube from your search results and focus on other educational websites.';
+            filterInstruction = 'استبعد منصة يوتيوب من نتائج بحثك وركز على المواقع التعليمية الأخرى.';
             break;
         case 'all':
         default:
-            filterInstruction = 'Search across both websites and YouTube.';
+            filterInstruction = 'ابحث في كل من المواقع الإلكترونية ومنصة يوتيوب.';
             break;
     }
 
-    const prompt = `You are an expert search engine specializing in educational content. Your task is to find educational resources about: "${query}".
+    const prompt = `أنت محرك بحث خبير ومتخصص في المحتوى التعليمي المصري. مهمتك هي العثور على مصادر تعليمية حول: "${query}".
 
-**Strict Rules:**
-1.  **Focused Search:** Search only on educational sites and YouTube channels. ${filterInstruction}
-2.  **No Summaries:** Do not write any introduction, summary, or conclusion. Your job is to list links only.
-3.  **Precise Output Format:** Each line of your response must be in this exact format:
-    [Direct Link to Site or Video] - [A 7-word description in English]
-4.  **Order:** Show site links first, then YouTube links.
-5.  **Quantity:** Try to find as many results as possible (up to 100).
+**قواعد صارمة:**
+1.  **التركيز المطلق:** ابحث فقط في المواقع الإلكترونية وقنوات اليوتيوب التعليمية **المصرية**. ${filterInstruction}
+2.  **لا للملخصات:** لا تكتب أي مقدمة أو ملخص أو خاتمة. مهمتك هي عرض قائمة الروابط فقط.
+3.  **تنسيق الإخراج الدقيق:** يجب أن يكون كل سطر في ردك بهذا التنسيق بالضبط:
+    [رابط مباشر للموقع أو الفيديو] - [وصف باللغة العربية من 7 كلمات بالضبط]
+4.  **الترتيب:** اعرض روابط المواقع الإلكترونية أولاً، ثم روابط اليوتيوب.
+5.  **الكمية:** حاول العثور على أكبر عدد ممكن من النتائج (حتى 100 نتيجة).
 
-**Example of Required Format:**
-https://www.example.edu/physics101 - The best explanation for high school physics.
-https://www.youtube.com/watch?v=example - Final exam review for organic chemistry concepts.
+**مثال للتنسيق المطلوب:**
+https://www.example.edu.eg/physics101 - أفضل شرح لمادة الفيزياء للصف الأول الثانوي.
+https://www.youtube.com/watch?v=example - مراجعة ليلة الامتحان في مادة الكيمياء العضوية.
 `;
 
     const apiCall = async () => {
@@ -745,9 +901,9 @@ https://www.youtube.com/watch?v=example - Final exam review for organic chemistr
     } catch (error) {
         console.error(`Error searching for materials on "${query}" after retries:`, error);
         if (error instanceof Error && error.message.includes('SAFETY')) {
-            throw new Error('Your search query was blocked by safety filters. Please try a different search term.');
+            throw new Error('تم حظر طلب البحث الخاص بك بواسطة مرشحات الأمان. يرجى تجربة مصطلح بحث مختلف.');
         }
-        throw new Error('An error occurred during the search. Please try again.');
+        throw new Error('حدث خطأ أثناء البحث. يرجى المحاولة مرة أخرى.');
     }
 };
 
@@ -756,7 +912,7 @@ export const createChat = (): Chat => {
     return currentAi.chats.create({
         model: 'gemini-2.5-flash',
         config: {
-            systemInstruction: 'You are an intelligent and friendly assistant. Your name is NagiZ. Answer questions in a helpful and concise manner.',
+            systemInstruction: 'أنت مساعد أكاديمي متخصص. مهمتك هي مناقشة المحتوى العلمي والتعليمي والمعرفي فقط، بما في ذلك تحليل الملفات التي يرفعها المستخدم (PDF, Word, صور). ارفض بأدب أي محادثة عادية أو غير ذات صلة بالمواضيع الأكاديمية. أجب دائمًا بنفس لغة سؤال المستخدم.',
         },
     });
 };
@@ -795,9 +951,9 @@ export const createChatWithContext = (context: string): Chat => {
     return currentAi.chats.create({
         model: 'gemini-2.5-flash',
         config: {
-            systemInstruction: `You are an intelligent and specialized assistant. Your task is to answer the user's questions based only on the following provided context. Do not use any external information. If the answer is not in the context, state that clearly to the user.
+            systemInstruction: `أنت مساعد ذكي ومتخصص. مهمتك هي الإجابة على أسئلة المستخدم بالاعتماد **فقط** على السياق التالي المقدم لك. لا تستخدم أي معلومات خارجية. أجب دائمًا بنفس لغة سؤال المستخدم. إذا لم تكن الإجابة موجودة في السياق، فأخبر المستخدم بذلك بوضوح.
 
-Context:
+السياق:
 ---
 ${trimmedContext}
 ---`,
@@ -808,24 +964,25 @@ ${trimmedContext}
 export const searchWithinDocument = async (context: string, query: string): Promise<SmartSearchResult | null> => {
     const currentAi = getAi();
     const prompt = `
-        You are an expert research assistant. Your task is to answer the user's query based solely on the provided text context.
+        You are an expert research assistant. Your task is to answer the user's query based ONLY on the provided text context.
 
-        Context:
+        CONTEXT:
         ---
         ${context.substring(0, 30000)}
         ---
 
-        User Query: "${query}"
+        USER QUERY: "${query}"
 
-        Requirements:
+        REQUIREMENTS:
         1. Find the most relevant information in the context to answer the query.
-        2. If the answer is found, formulate a clear and concise answer.
+        2. If the answer is found, formulate a clear and concise answer in Arabic.
         3. Extract the exact quote(s) from the context that support your answer.
-        4. Try to identify the page number(s) from the context. Page numbers are denoted by "--- PAGE [number] ---". Format it as "p. X" or "p. X-Y". If you can't determine the page, use "N/A".
-        5. Generate 3 insightful follow-up questions the user might have.
-        6. If the answer is not found in the context, your answer should state that clearly, and other fields should be empty or indicate so.
+        4. Try to identify the page number(s) from the context. Page numbers are denoted by "--- PAGE [number] ---". Formulate this as "p. X" or "pp. X-Y". If you cannot determine the page, use "N/A".
+        5. Generate 3 insightful follow-up questions in Arabic that the user might have.
+        6. If the answer cannot be found in the context, your answer should state that clearly in Arabic, and the other fields should be empty or indicate that.
+        7. The "quote" field must be an exact extraction from the text without translation.
 
-        Your response must be a single, valid JSON object, with no other text or markdown. Adhere strictly to this schema:
+        Your response MUST be a single valid JSON object, with no other text or markdown. Adhere strictly to this schema:
         {
           "answer": "string",
           "quote": "string",
@@ -875,25 +1032,25 @@ export const categorizeBooks = async (bookTitles: {id: string, name: string}[]):
     }
 
     const prompt = `
-        You are an expert AI librarian. Your task is to categorize the following list of book titles into relevant main categories and sub-categories.
+        You are an expert librarian AI. Your task is to categorize the following list of book titles into main categories and relevant sub-categories.
 
         Book Titles (with their original IDs):
         ${bookTitles.map(b => `- ${b.name} (id: ${b.id})`).join('\n')}
 
         Requirements:
         1. Analyze each title to determine its subject matter.
-        2. Group the books under appropriate main categories (e.g., "Computer Science", "History", "Literature").
-        3. Within each main category, group the books into more specific sub-categories (e.g., "Web Development", "Roman History", "Modernist Novels").
-        4. The final output must be only a valid JSON object that strictly follows the provided schema. Do not include any text, markdown, or explanations before or after the JSON.
-        5. Every book title from the input list must appear in exactly one sub-category. Respond with the book title only, not the ID.
-        6. Category and sub-category names should be in English.
+        2. Group books under appropriate main categories (e.g., "Computer Science", "History", "Literature").
+        3. Within each main category, group books into more specific sub-categories (e.g., "Web Development", "Roman History", "Modernist Novels").
+        4. The final output must be ONLY a valid JSON object that strictly follows the provided schema. Do not include any text, markdown, or explanations before or after the JSON.
+        5. Each book title from the input list must appear in exactly one sub-category. Respond with the book's title only, not the ID.
+        6. The category and subCategory names must be in Arabic, even if the book titles are in another language.
 
         JSON Schema:
         An array of main category objects. Each object has:
-        - "category": string (the name of the main category)
-        - "subCategories": an array of sub-category objects. Each object has:
-          - "subCategory": string (the name of the sub-category)
-          - "books": an array of strings, where each string is a book title belonging to this sub-category.
+        - "category": string (The name of the main category in Arabic)
+        - "subCategories": An array of sub-category objects. Each object has:
+          - "subCategory": string (The name of the sub-category in Arabic)
+          - "books": An array of strings, where each string is a book title belonging to this sub-category.
     `;
     
     const responseSchema = {
@@ -936,5 +1093,40 @@ export const categorizeBooks = async (bookTitles: {id: string, name: string}[]):
     } catch (error) {
         console.error("Error categorizing books:", error);
         return null;
+    }
+};
+
+export const explainPageContent = async (pageText: string): Promise<string | null> => {
+    const currentAi = getAi();
+    if (!pageText || !pageText.trim()) {
+        return "This page appears to be empty or contains only images.";
+    }
+
+    const prompt = `
+        أنت خبير تعليمي متخصص. مهمتك هي تقديم شرح وافٍ ومفصل للمحتوى التالي من صفحة في مستند.
+        يجب أن يكون الشرح عميقًا ويغطي النقاط الرئيسية بالتفصيل، مع الحفاظ على الوضوح والبساطة قدر الإمكان.
+        مهم جداً: تعامل مع النص بلغته الأصلية ولا تقم بترجمته.
+
+        النص:
+        ---
+        ${pageText.substring(0, 15000)}
+        ---
+
+        المطلوب: الشرح المفصل فقط، كنص نقي بدون أي مقدمات أو عناوين أو تنسيق markdown.
+    `;
+
+    const apiCall = async () => {
+        const response: GenerateContentResponse = await currentAi.models.generateContent({
+            model: "gemini-2.5-flash",
+            contents: prompt,
+        });
+        return response.text?.trim() || "Could not generate an explanation.";
+    };
+    
+    try {
+        return await callApiWithRetry(apiCall);
+    } catch (error) {
+         console.error("Error explaining page content after retries:", error);
+         return "Sorry, an error occurred while generating the explanation.";
     }
 };

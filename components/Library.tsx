@@ -185,8 +185,8 @@ export const Library: React.FC<LibraryProps> = ({ onGoHome }) => {
                                    </h3>
                                    <ul className="space-y-2">
                                        {subCat.books.map(bookName => (
-                                           <li key={bookName} className="flex justify-between items-center p-3 bg-[var(--color-background-primary)] rounded-lg shadow-sm hover:shadow-md transition-shadow">
-                                               <span className="font-semibold text-base" style={{color: 'var(--color-text-brown-dark)'}}>{bookName}</span>
+                                           <li key={bookName} dir="auto" className="flex justify-between items-center p-3 bg-[var(--color-background-primary)] rounded-lg shadow-sm hover:shadow-md transition-shadow">
+                                               <span className="font-semibold text-base text-start" style={{color: 'var(--color-text-brown-dark)'}}>{bookName}</span>
                                                 <div className="flex items-center gap-2">
                                                     <button 
                                                         onClick={() => handleDownload(booksByName[bookName])} 

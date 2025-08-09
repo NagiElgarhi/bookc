@@ -1,3 +1,4 @@
+
 import React from 'react';
 import { HistoryIcon, GradientBookOpenIcon, UploadIcon, RomanTempleIcon, SearchIcon, WhatsAppIcon, MailIcon } from './icons';
 
@@ -65,15 +66,16 @@ const FileUploader: React.FC<FileUploaderProps> = ({
 
             <div className="flex flex-col items-center">
                 <div 
-                    className="mb-2 whitespace-nowrap"
+                    className="whitespace-nowrap"
                     style={{
                         fontFamily: "'Cinzel Decorative', serif",
-                        fontSize: '28px',
+                        fontSize: '22.5px',
                         color: '#4682B4',
                         fontWeight: 'bold',
+                        marginBottom: '35px',
                     }}
                 >
-                    Book Master
+                    Master of the PDF Books
                 </div>
                 <div
                     className="relative z-10 w-full max-w-lg rounded-lg p-[2px] h-80"
@@ -91,18 +93,18 @@ const FileUploader: React.FC<FileUploaderProps> = ({
                         </div>
                         
                         <div className="my-4">
-                             <p className="text-4xl font-bold golden-text">
-                                Book-C
-                             </p>
+                             <div className="text-4xl font-bold text-wavy-dark-gold animate-shimmer">
+                                Book _ C
+                             </div>
                              <p className="text-3xl font-bold text-[var(--color-text-primary)] mt-2 flex items-center justify-center gap-2">
                                  <RomanTempleIcon className="w-8 h-8 inline-block" /> 
-                                 <span>The AI Companion</span>
+                                 <span>The Smart Companion</span>
                              </p>
                         </div>
 
                         <div className="text-center">
-                            <p className="text-base text-[var(--color-text-tertiary)]">Smart PDF Community Tools</p>
-                            <p className="text-sm text-[var(--color-text-tertiary)] mt-1">Execution by Nagiz.net</p>
+                            <p className="text-base text-[var(--color-text-tertiary)]">Smart Community Tools for PDF files</p>
+                            <p className="text-sm text-[var(--color-text-tertiary)] mt-1">Implementation by Nagiz.net</p>
                             <div className="flex flex-col items-center gap-y-1 mt-3 text-xs font-semibold">
                                 <a 
                                     href="https://wa.me/201066802250" 

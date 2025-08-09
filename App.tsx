@@ -16,9 +16,13 @@ import TaskManager from './components/TaskManager';
 import UserGuide from './components/UserGuide';
 import Calculator from './components/Calculator';
 import PurchaseRequest from './components/PurchaseRequest';
+import PdfReaderSidebar from './components/PdfReaderSidebar';
+import ExplanationPopup from './components/ExplanationPopup';
+import FloatingActionButton from './components/FloatingActionButton';
+import ApiKeyModal from './components/ApiKeyModal';
 import { HomeIcon, WhatsAppIcon, EditIcon, RomanTempleIcon, SummarizeIcon, ChatBubbleIcon, SearchIcon, EggIcon, OliveIcon, SettingsIcon, MailIcon, PrayerTimeIcon, ClipboardListIcon, InfoIcon, ShieldIcon, CalculatorIcon, BookOpenIcon, CheckCircleIcon, BookshelfIcon, GradientBookOpenIcon, MenuIcon } from './components/icons';
 import { extractTextPerPage } from './services/pdfService';
-import { analyzeDocumentStructure, analyzeChapterForLessons, generateInteractiveLesson, generateInitialQuestions, getFeedbackOnAnswers, generateMoreQuestions, getDeeperExplanation, getAiCorrections } from './services/geminiService';
+import { analyzeDocumentStructure, analyzeChapterForLessons, generateInteractiveLesson, generateInitialQuestions, getFeedbackOnAnswers, generateMoreQuestions, getDeeperExplanation, getAiCorrections, explainPageContent, setUserApiKey, hasValidApiKey } from './services/geminiService';
 import { generateTheme } from './services/themeService';
 import { saveBook, getBookById, saveActiveBookState, loadActiveBookState, clearAllData, clearActiveBookState } from './services/dbService';
 import { InteractiveContent, UserAnswer, FeedbackItem, Chapter, PageText, Lesson, ColorTheme, InteractiveBlock, SavedBook, AppState, ThemeMode } from './types';
@@ -60,6 +64,8 @@ function App() {
   const [activeSidebar, setActiveSidebar] = useState<string | null>(null);
   const [initialChapterForTest, setInitialChapterForTest] = useState<Chapter | null>(null);
   const [chatContext, setChatContext] = useState<string | null>(null);
+  const [explanationPopup, setExplanationPopup] = useState<{ content: string | null; isLoading: boolean; position: { x: number; y: number } } | null>(null);
+  const [isApiKeyModalOpen, setIsApiKeyModalOpen] = useState(false);
 
   const settingsMenuRef = useRef<HTMLDivElement>(null);
   const settingsButtonRef = useRef<HTMLButtonElement>(null);
@@ -68,6 +74,10 @@ function App() {
 
   // Load initial state from localStorage/IndexedDB
   useEffect(() => {
+    if (!hasValidApiKey()) {
+        setIsApiKeyModalOpen(true);
+    }
+
     const savedTheme = localStorage.getItem('appTheme');
     if (savedTheme) {
       try {
@@ -145,7 +155,7 @@ function App() {
         setActiveBook(null);
         setChapters(null);
         setInteractiveContent(null);
-        alert("All data has been cleared successfully.");
+        alert("All data cleared successfully.");
     }
   };
   
@@ -157,6 +167,17 @@ function App() {
   const handleMobileMenuItemClick = (action: () => void) => {
     action();
     setIsMobileMenuOpen(false);
+  };
+  
+  const handleApiError = (error: any) => {
+    const errorMessageStr = error instanceof Error ? error.message : String(error);
+    if (errorMessageStr.includes("API Key not provided")) {
+        setIsApiKeyModalOpen(true);
+    } else {
+        console.error(error);
+        setErrorMessage(errorMessageStr);
+        setAppState('error');
+    }
   };
 
   const handleFileSelect = useCallback(async (file: File) => {
@@ -193,9 +214,7 @@ function App() {
         throw new Error('Failed to analyze document structure.');
       }
     } catch (err) {
-      console.error(err);
-      setErrorMessage(err instanceof Error ? err.message : 'An unexpected error occurred.');
-      setAppState('error');
+      handleApiError(err);
     }
   }, []);
 
@@ -222,19 +241,23 @@ function App() {
         .filter(p => p.pageNumber >= chapter.startPage && p.pageNumber <= chapter.endPage)
         .map(p => p.text)
         .join('\n\n');
+    try {
+        const lessons = await analyzeChapterForLessons(chapterText, chapter);
+        chaptersCopy = JSON.parse(JSON.stringify(chaptersCopy)); // deep copy again to ensure re-render
+        chaptersCopy[chapterIndex].lessons = lessons || [];
+        chaptersCopy[chapterIndex].isAnalyzing = false;
+        setChapters(chaptersCopy);
 
-    const lessons = await analyzeChapterForLessons(chapterText, chapter);
-    
-    chaptersCopy = JSON.parse(JSON.stringify(chaptersCopy)); // deep copy again to ensure re-render
-    chaptersCopy[chapterIndex].lessons = lessons || [];
-    chaptersCopy[chapterIndex].isAnalyzing = false;
-    setChapters(chaptersCopy);
-
-    if(activeBook) {
-        const updatedBook = {...activeBook, chapters: chaptersCopy};
-        await saveBook(updatedBook);
-        await saveActiveBookState({id: activeBook.id, xp: 0, chapters: chaptersCopy });
-        setActiveBook(updatedBook);
+        if(activeBook) {
+            const updatedBook = {...activeBook, chapters: chaptersCopy};
+            await saveBook(updatedBook);
+            await saveActiveBookState({id: activeBook.id, xp: 0, chapters: chaptersCopy });
+            setActiveBook(updatedBook);
+        }
+    } catch (err) {
+        handleApiError(err);
+        chaptersCopy[chapterIndex].isAnalyzing = false;
+        setChapters(chaptersCopy);
     }
   };
 
@@ -256,62 +279,74 @@ function App() {
         setOriginalFullContent(content);
         setAppState('session');
       } else {
-        throw new Error('The AI was unable to generate interactive content for this lesson.');
+        throw new Error('The AI could not generate interactive content for this lesson.');
       }
     } catch (err) {
-      console.error(err);
-      setErrorMessage(err instanceof Error ? err.message : 'An unexpected error occurred.');
-      setAppState('error');
+      handleApiError(err);
     }
   }, [activeBook]);
   
   const handleGenerateInitialQuestions = async () => {
     if(!interactiveContent) return;
     setIsGeneratingMore(true);
-    const lessonText = interactiveContent.content.filter(b => b.type === 'explanation').map(b => (b as any).text).join('\n');
-    const questions = await generateInitialQuestions(lessonText);
-    if(questions && questions.length > 0) {
-      setInteractiveContent(prev => prev ? ({ ...prev, content: [...prev.content, ...questions] }) : null);
-      setOriginalFullContent(prev => prev ? ({ ...prev, content: [...prev.content, ...questions] }) : null);
-    } else {
-      alert("Failed to generate additional questions. Please try again.");
+    try {
+        const lessonText = interactiveContent.content.filter(b => b.type === 'explanation').map(b => (b as any).text).join('\n');
+        const questions = await generateInitialQuestions(lessonText);
+        if(questions && questions.length > 0) {
+          setInteractiveContent(prev => prev ? ({ ...prev, content: [...prev.content, ...questions] }) : null);
+          setOriginalFullContent(prev => prev ? ({ ...prev, content: [...prev.content, ...questions] }) : null);
+        } else {
+          alert("Failed to generate additional questions. Please try again.");
+        }
+    } catch(err) {
+        handleApiError(err);
+    } finally {
+        setIsGeneratingMore(false);
     }
-    setIsGeneratingMore(false);
   };
   
   const handleGenerateMoreQuestions = async () => {
     if (!interactiveContent) return;
     setIsGeneratingMore(true);
-    const lessonText = interactiveContent.content.filter(b => b.type === 'explanation').map(b => (b as any).text).join('\n');
-    const existingQuestions = interactiveContent.content.filter(b => b.type.endsWith('_question'));
-    const newQuestions = await generateMoreQuestions(lessonText, existingQuestions);
-    if(newQuestions && newQuestions.length > 0) {
-      setInteractiveContent(prev => prev ? ({...prev, content: [...prev.content, ...newQuestions] }) : null);
-      setOriginalFullContent(prev => prev ? ({...prev, content: [...prev.content, ...newQuestions] }) : null);
-    } else {
-      alert("Failed to generate additional questions. Please try again.");
+    try {
+        const lessonText = interactiveContent.content.filter(b => b.type === 'explanation').map(b => (b as any).text).join('\n');
+        const existingQuestions = interactiveContent.content.filter(b => b.type.endsWith('_question'));
+        const newQuestions = await generateMoreQuestions(lessonText, existingQuestions);
+        if(newQuestions && newQuestions.length > 0) {
+          setInteractiveContent(prev => prev ? ({...prev, content: [...prev.content, ...newQuestions] }) : null);
+          setOriginalFullContent(prev => prev ? ({...prev, content: [...prev.content, ...newQuestions] }) : null);
+        } else {
+          alert("Failed to generate additional questions. Please try again.");
+        }
+    } catch (err) {
+        handleApiError(err);
+    } finally {
+        setIsGeneratingMore(false);
     }
-    setIsGeneratingMore(false);
   };
 
   const handleGetDeeperExplanation = async (text: string) => {
-      const explanation = await getDeeperExplanation(text);
-      if (explanation && interactiveContent) {
-          const newBlock: InteractiveBlock = {
-              id: generateUniqueId(),
-              type: 'explanation',
-              text: `Additional Explanation: ${explanation}`
-          };
-          
-          const contentCopy = [...interactiveContent.content];
-          const originalBlockIndex = contentCopy.findIndex(b => b.type === 'explanation' && (b as any).text === text);
-          if(originalBlockIndex !== -1){
-              contentCopy.splice(originalBlockIndex + 1, 0, newBlock);
-              setInteractiveContent({...interactiveContent, content: contentCopy});
-          }
-      } else {
-          alert('Failed to get a deeper explanation.');
-      }
+    try {
+        const explanation = await getDeeperExplanation(text);
+        if (explanation && interactiveContent) {
+            const newBlock: InteractiveBlock = {
+                id: generateUniqueId(),
+                type: 'explanation',
+                text: `Deeper Explanation: ${explanation}`
+            };
+            
+            const contentCopy = [...interactiveContent.content];
+            const originalBlockIndex = contentCopy.findIndex(b => b.type === 'explanation' && (b as any).text === text);
+            if(originalBlockIndex !== -1){
+                contentCopy.splice(originalBlockIndex + 1, 0, newBlock);
+                setInteractiveContent({...interactiveContent, content: contentCopy});
+            }
+        } else {
+            alert('Failed to get a deeper explanation.');
+        }
+    } catch (err) {
+        handleApiError(err);
+    }
   };
 
   const handleSubmitAnswers = useCallback(async (answers: UserAnswer[]) => {
@@ -324,8 +359,7 @@ function App() {
         setFeedback(feedbackData);
       }
     } catch (err) {
-      console.error(err);
-      setErrorMessage('Failed to evaluate answers.');
+      handleApiError(err);
     } finally {
       setIsSubmitting(false);
     }
@@ -356,11 +390,10 @@ function App() {
             });
             setFeedback(newFeedback);
         } else {
-           alert("The AI could not provide corrections.");
+           alert("The AI was unable to provide corrections.");
         }
     } catch (error) {
-        console.error("Error getting AI corrections:", error);
-        alert("An error occurred while getting corrections.");
+        handleApiError(error);
     } finally {
         setIsCorrecting(false);
     }
@@ -434,6 +467,36 @@ function App() {
     }
     setActiveSidebar('chat');
   };
+  
+  const handleOpenPdfReader = () => {
+    setActiveSidebar('pdf_reader');
+  };
+
+  const handleExplainPage = useCallback(async (pageText: string, event: React.MouseEvent) => {
+      const rect = event.currentTarget.getBoundingClientRect();
+      setExplanationPopup({ 
+          content: null, 
+          isLoading: true, 
+          position: { x: rect.left, y: rect.top }
+      });
+
+      try {
+          const explanation = await explainPageContent(pageText);
+          setExplanationPopup(prev => prev ? { ...prev, content: explanation, isLoading: false } : null);
+      } catch (e) {
+          setExplanationPopup(null);
+          handleApiError(e);
+      }
+  }, []);
+
+  const closeExplanationPopup = () => setExplanationPopup(null);
+
+  const handleSetApiKey = (key: string) => {
+    setUserApiKey(key);
+    setIsApiKeyModalOpen(false);
+    // After setting the key, you might want to retry the last action or prompt the user to.
+    // For now, simply closing the modal and letting the user re-trigger the action is sufficient.
+  };
 
   const renderContent = () => {
     if (appState === 'error') {
@@ -441,13 +504,13 @@ function App() {
         <div className="text-center p-8">
           <h2 className="text-2xl font-bold text-red-500 mb-4">An Error Occurred</h2>
           <p className="text-[var(--color-text-secondary)] mb-6">{errorMessage}</p>
-          <button onClick={handleBackToUpload} style={{backgroundImage: 'linear-gradient(to bottom right, #c09a3e, #856a3d)'}} className="px-6 py-2 text-white font-bold rounded-lg">Go Back</button>
+          <button onClick={handleBackToUpload} style={{backgroundImage: 'linear-gradient(to bottom right, #c09a3e, #856a3d)'}} className="px-6 py-2 text-white font-bold rounded-lg">Back</button>
         </div>
       );
     }
     
     if (appState === 'analyzing' || appState === 'generating') {
-      const text = appState === 'analyzing' ? 'Analyzing...' : 'Generating Interactive Session...';
+      const text = appState === 'analyzing' ? 'Analyzing...' : 'Generating interactive session...';
       return <LoadingSpinner text={text} />;
     }
 
@@ -513,13 +576,10 @@ function App() {
   const MenuItem: React.FC<{icon: React.FC<{className?: string}>, text: string, onClick: () => void}> = ({ icon: Icon, text, onClick }) => (
     <button
         onClick={() => handleMenuItemClick(onClick)}
-        className="w-full flex items-center justify-start gap-2 p-2 rounded-md text-white hover:opacity-90 transition-opacity"
-        style={{
-            backgroundImage: 'linear-gradient(to bottom, #a1885b, #4a2c2a)'
-        }}
+        className="w-full flex items-center justify-start gap-2 p-2 rounded-md text-white hover:opacity-90 transition-opacity bg-dark-gold-gradient"
     >
         <Icon className="w-4 h-4 shrink-0 text-white" />
-        <span className="font-semibold text-xs leading-tight">{text}</span>
+        <span className="font-semibold text-xs leading-tight whitespace-nowrap">{text}</span>
     </button>
   );
 
@@ -532,6 +592,7 @@ function App() {
 
   return (
     <div className="min-h-screen w-full bg-[var(--color-background-primary)] text-[var(--color-text-primary)] flex flex-col relative" dir="ltr">
+      {isApiKeyModalOpen && <ApiKeyModal onSetKey={handleSetApiKey} onCancel={() => setIsApiKeyModalOpen(false)} />}
       <input 
             type="file"
             ref={fileInputRef}
@@ -540,39 +601,49 @@ function App() {
             accept=".pdf,.doc,.docx,image/*"
       />
       
+      <div className="md:hidden">
+        <FloatingActionButton
+            onClick={() => setIsMobileMenuOpen(prev => !prev)}
+            ariaLabel="Toggle Menu"
+            position="left"
+            top="50%"
+        >
+            <MenuIcon className="w-5 h-5 rotate-180" />
+        </FloatingActionButton>
+      </div>
+      
       <header className="no-print sticky top-0 z-40 bg-[var(--color-background-primary)]/80 backdrop-blur-sm border-b border-[var(--color-border-primary)] shadow-sm">
         <div className="container mx-auto px-4 py-2 grid grid-cols-3 items-center">
             
-             <div className="flex items-center justify-start gap-4">
-                <button onClick={handleBackToUpload} title="Home">
-                    <RomanTempleIcon className="w-12 h-12" />
-                </button>
-                <div className="text-left">
-                    <div className="text-wavy-dark-gold animate-shimmer font-bold text-2xl" style={{ fontFamily: "'Cinzel Decorative', serif" }}>
-                        Book-C
+            {/* --- LEFT COLUMN --- */}
+            <div className="flex items-center justify-start">
+                 <button onClick={handleBackToUpload} title="Home" className="flex items-center gap-3">
+                    <RomanTempleIcon className="w-10 h-10 md:w-12 md:h-12" />
+                    <div className="text-wavy-dark-gold animate-shimmer font-bold text-xl md:text-2xl whitespace-nowrap" style={{ fontFamily: "'Cinzel Decorative', serif" }}>
+                        Book _ C
                     </div>
-                </div>
+                </button>
             </div>
 
+            {/* --- CENTER COLUMN --- */}
              <div className="flex items-center justify-center">
-                {/* Desktop Buttons */}
+                {/* Mobile: Logo - MOVED TO LEFT */}
+                <div className="md:hidden flex items-center justify-center">
+                    {/* Content moved to left column */}
+                </div>
+                {/* Desktop: Buttons */}
                 <div className="hidden md:flex items-center justify-center gap-4">
                     <button onClick={() => setActiveSidebar('edit')} title="Edit Text" className="p-2 rounded-full text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background-tertiary)] transition-colors"><EditIcon className="w-5 h-5" /></button>
                     <button onClick={() => setActiveSidebar('summarize')} title="Summaries" className="p-2 rounded-full text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background-tertiary)] transition-colors"><SummarizeIcon className="w-5 h-5" /></button>
                     <button onClick={() => setActiveSidebar('test_me')} title="Test Me" className="p-2 rounded-full text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background-tertiary)] transition-colors"><CheckCircleIcon className="w-5 h-5" /></button>
                     <button onClick={() => setActiveSidebar('ask_me')} title="Ask Me" className="p-2 rounded-full text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background-tertiary)] transition-colors"><span className="font-bold text-lg w-5 h-5 flex items-center justify-center">?</span></button>
-                    <button onClick={triggerFileInput} title="Interactive Book" className="p-2 rounded-full text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background-tertiary)] transition-colors"><GradientBookOpenIcon className="w-6 h-6" gradientId="header-book-icon" /></button>
+                    <button onClick={handleOpenPdfReader} title="PDF Reader" className="p-2 rounded-full text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background-tertiary)] transition-colors"><GradientBookOpenIcon className="w-6 h-6" gradientId="header-book-icon" /></button>
                     <button onClick={handleOpenChat} title="Academic Chat" className="p-2 rounded-full text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background-tertiary)] transition-colors"><ChatBubbleIcon className="w-5 h-5" /></button>
                     <button onClick={() => setActiveSidebar('smart_search')} title="Smart Search" className="p-2 rounded-full text-[var(--color-text-secondary)] hover:text-[var(--color-text-primary)] hover:bg-[var(--color-background-tertiary)] transition-colors"><SearchIcon className="w-5 h-5" /></button>
                 </div>
-                {/* Mobile Hamburger Menu Button */}
-                <div className="md:hidden">
-                    <button onClick={() => setIsMobileMenuOpen(prev => !prev)} className="p-2 rounded-full text-[var(--color-text-primary)] hover:bg-[var(--color-background-tertiary)] transition-colors">
-                        <MenuIcon className="w-6 h-6" />
-                    </button>
-                </div>
             </div>
           
+            {/* --- RIGHT COLUMN --- */}
             <div className="flex items-center justify-end gap-4">
                 <button onClick={handleThemeToggle} title="Toggle Theme" className="p-1 rounded-full hover:bg-[var(--color-background-tertiary)] transition-colors">
                     {theme.mode === 'dark' ? <EggIcon className="w-8 h-8 rotate-180"/> : <OliveIcon className="w-8 h-8 rotate-90"/>}
@@ -581,25 +652,20 @@ function App() {
                 <button
                   ref={settingsButtonRef}
                   onClick={() => setIsSettingsOpen(prev => !prev)}
-                  className="p-2 rounded-full text-[var(--color-text-secondary)] hover:bg-[var(--color-background-tertiary)] transition-colors"
+                  className="p-2 rounded-full text-white bg-dark-gold-gradient transition-opacity hover:opacity-90 shadow-lg"
                   aria-label="Settings"
                 >
-                  <SettingsIcon className="w-8 h-8 text-wavy-dark-gold animate-shimmer" style={{ backgroundSize: '250% auto' }}/>
+                  <MenuIcon className="w-6 h-6" />
                 </button>
                 {isSettingsOpen && (
                   <div 
                     ref={settingsMenuRef}
-                    className="absolute right-0 mt-2 w-[120px] rounded-lg shadow-2xl p-[2px]"
+                    className="absolute right-0 mt-2 w-auto rounded-lg shadow-2xl p-[2px]"
                     style={{
                       backgroundImage: 'linear-gradient(to bottom right, #c09a3e, #856a3d)',
                     }}
                   >
-                    <div 
-                        className="rounded-md p-2"
-                        style={{
-                            backgroundImage: 'var(--color-background-container-gradient)',
-                        }}
-                    >
+                    <div className="rounded-md p-1 bg-[var(--color-background-primary)]">
                         <div className="flex flex-col gap-1">
                             <MenuItem icon={PrayerTimeIcon} text="Prayer" onClick={() => setActiveView('prayer_times')} />
                             <MenuItem icon={BookshelfIcon} text="Library" onClick={() => setActiveView('library')} />
@@ -635,7 +701,7 @@ function App() {
       <main className="flex-grow flex justify-center items-center p-4">
         {mainContent()}
       </main>
-      
+
       <SearchSidebar isOpen={activeSidebar === 'search'} onClose={() => setActiveSidebar(null)} onGoHome={onGoHome} />
       <EditSidebar isOpen={activeSidebar === 'edit'} onClose={() => setActiveSidebar(null)} onGoHome={onGoHome} />
       <SummarizerSidebar isOpen={activeSidebar === 'summarize'} onClose={() => setActiveSidebar(null)} onGoHome={onGoHome} />
@@ -643,6 +709,19 @@ function App() {
       <QuestionGeneratorSidebar isOpen={activeSidebar === 'test_me'} onClose={() => setActiveSidebar(null)} onGoHome={onGoHome} initialChapter={initialChapterForTest} initialPageTexts={activeBook?.pageTexts || null} />
       <AskMeSidebar isOpen={activeSidebar === 'ask_me'} onClose={() => setActiveSidebar(null)} onGoHome={onGoHome} />
       <SmartSearchSidebar isOpen={activeSidebar === 'smart_search'} onClose={() => setActiveSidebar(null)} onGoHome={onGoHome} />
+      <PdfReaderSidebar
+          isOpen={activeSidebar === 'pdf_reader'}
+          onClose={() => setActiveSidebar(null)}
+          onGoHome={onGoHome}
+          onExplainPage={handleExplainPage}
+      />
+
+      {explanationPopup && (
+          <ExplanationPopup 
+              {...explanationPopup}
+              onClose={closeExplanationPopup}
+          />
+      )}
 
     </div>
   );

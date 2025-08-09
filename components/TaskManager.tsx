@@ -160,7 +160,7 @@ const TaskManager: React.FC<TaskManagerProps> = ({ onRequestPurchase, onGoHome }
     }, [tasks, statusFilter, categoryFilter]);
 
     return (
-        <div className="w-full max-w-7xl h-full rounded-2xl shadow-2xl flex flex-col">
+        <div dir="rtl" className="w-full max-w-7xl h-full rounded-2xl shadow-2xl flex flex-col">
             <div className="bg-[var(--color-background-primary)] w-full h-full rounded-2xl shadow-2xl flex flex-col">
                 <header className="flex-shrink-0 p-4 border-b border-[var(--color-border-primary)] flex justify-between items-center">
                     <button onClick={onGoHome} className="flex items-center gap-2 px-4 py-2 text-base font-semibold text-white rounded-lg hover:opacity-90 transition-colors" style={{backgroundImage: goldenGradient}}>

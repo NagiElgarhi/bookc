@@ -16,6 +16,7 @@ const PurchaseRequest: React.FC<PurchaseRequestProps> = ({ onBack }) => {
             </div>
             <div className="w-full lg:w-[65%] mx-auto rounded-2xl p-[2px] bg-gradient-to-br from-[#c09a3e] to-[#856a3d] mt-4">
                 <div 
+                    dir="rtl"
                     className="w-full h-full text-center rounded-[calc(1rem-2px)] p-6 sm:p-8 flex flex-col"
                     style={{ backgroundImage: 'var(--color-background-container-gradient)' }}
                 >

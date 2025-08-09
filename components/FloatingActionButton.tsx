@@ -1,3 +1,4 @@
+
 import React from 'react';
 
 interface SideTabButtonProps {
@@ -14,7 +15,7 @@ const FloatingActionButton: React.FC<SideTabButtonProps> = ({ onClick, children,
     : "right-0 rounded-l-2xl";
 
   const styleClasses = position === 'left'
-    ? "bg-gradient-to-br from-orange-600 to-yellow-400 text-white"
+    ? "bg-dark-gold-gradient text-white"
     : "bg-gradient-to-br from-gray-300 to-gray-100 text-gray-800";
     
   return (

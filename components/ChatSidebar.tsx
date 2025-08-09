@@ -1,7 +1,11 @@
+
 import React, { useState, useCallback, useEffect, useRef } from 'react';
 import { Chat } from '@google/genai';
 import { createChat, createChatWithContext } from '../services/geminiService';
-import { SendIcon, XIcon, RomanTempleIcon, ChatBubbleIcon, HomeIcon, HtmlIcon, PdfIcon, PrintIcon } from './icons';
+import { extractTextPerPage } from '../services/pdfService';
+import { SendIcon, XIcon, RomanTempleIcon, ChatBubbleIcon, HomeIcon, HtmlIcon, PdfIcon, PrintIcon, PlusIcon } from './icons';
+
+declare const mammoth: any;
 
 interface ChatSidebarProps {
     isOpen: boolean;
@@ -22,6 +26,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({ isOpen, onClose, onGoHome, co
     const [isLoading, setIsLoading] = useState(false);
     const messagesEndRef = useRef<HTMLDivElement>(null);
     const sidebarRef = useRef<HTMLElement>(null);
+    const fileInputRef = useRef<HTMLInputElement>(null);
     const goldenGradient = 'linear-gradient(to bottom right, #FBBF24, #262626)';
 
     useEffect(() => {
@@ -31,7 +36,7 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({ isOpen, onClose, onGoHome, co
                 setMessages([{ role: 'model', text: 'Welcome! I am ready to answer questions about the current document.' }]);
             } else {
                 setChat(createChat());
-                setMessages([{ role: 'model', text: 'Welcome! I am NagiZ, your intelligent assistant. How can I help you today?' }]);
+                setMessages([{ role: 'model', text: 'Welcome! I am your Academic Assistant. Upload a file using the (+) button or ask me any academic question.' }]);
             }
         } else {
             setChat(null);
@@ -139,6 +144,70 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({ isOpen, onClose, onGoHome, co
             setIsLoading(false);
         }
     }, [userInput, chat, isLoading]);
+    
+    const handleFileChange = async (event: React.ChangeEvent<HTMLInputElement>) => {
+        const file = event.target.files?.[0];
+        if (!file || !chat || isLoading) return;
+
+        const userMessage: Message = { role: 'user', text: `File attached: ${file.name}` };
+        setMessages(prev => [...prev, userMessage, { role: 'model', text: '' }]);
+        setIsLoading(true);
+
+        try {
+            let messageParts: ({ text: string } | { inlineData: { data: string; mimeType: string; } })[] = [];
+            
+            if (file.type.startsWith('image/')) {
+                const base64Data = await new Promise<string>((resolve, reject) => {
+                    const reader = new FileReader();
+                    reader.onloadend = () => resolve((reader.result as string).split(',')[1]);
+                    reader.onerror = reject;
+                    reader.readAsDataURL(file);
+                });
+                messageParts = [
+                    { inlineData: { data: base64Data, mimeType: file.type } },
+                    { text: "Please analyze this image and confirm you are ready for questions about it." }
+                ];
+            } else {
+                let fileText = '';
+                if (file.type === 'application/pdf') {
+                    const pages = await extractTextPerPage(file);
+                    fileText = pages.map(p => p.text).join('\n\n');
+                } else if (file.type.includes('word')) {
+                    const arrayBuffer = await file.arrayBuffer();
+                    const result = await mammoth.extractRawText({ arrayBuffer });
+                    fileText = result.value;
+                }
+                const promptText = `Please analyze the content of the file named "${file.name}" provided below. Once you have processed it, confirm that you are ready for my questions.\n\n--- FILE CONTENT ---\n${fileText}`;
+                messageParts = [{ text: promptText }];
+            }
+
+            const stream = await chat.sendMessageStream({ message: messageParts });
+
+            for await (const chunk of stream) {
+                setMessages(prev => {
+                    const lastMessage = prev[prev.length - 1];
+                    if (lastMessage.role === 'model') {
+                        const updatedMessages = [...prev.slice(0, -1)];
+                        updatedMessages.push({ ...lastMessage, text: lastMessage.text + chunk.text });
+                        return updatedMessages;
+                    }
+                    return prev;
+                });
+            }
+        } catch (error) {
+            console.error("File processing error:", error);
+            setMessages(prev => [...prev, { role: 'model', text: 'Sorry, an error occurred while processing the file. Please try again.' }]);
+        } finally {
+            setIsLoading(false);
+            if (event.target) {
+                event.target.value = '';
+            }
+        }
+    };
+
+    const triggerFileUpload = () => {
+        fileInputRef.current?.click();
+    };
 
     return (
         <aside
@@ -169,15 +238,15 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({ isOpen, onClose, onGoHome, co
                     
                     <div className="flex-grow flex flex-col min-h-0 overflow-hidden printable-content">
                         {/* Messages Area */}
-                        <div id="chat-content" className="flex-grow p-4 overflow-y-auto space-y-4" style={{ fontFamily: "'Times New Roman', serif" }}>
+                        <div id="chat-content" dir="auto" className="flex-grow p-4 overflow-y-auto space-y-4" style={{ fontFamily: "'Times New Roman', serif" }}>
                             {messages.map((msg, index) => (
                                 <div key={index} className={`flex items-start gap-3 ${msg.role === 'user' ? 'justify-end' : ''}`}>
-                                    <div className={`max-w-xs md:max-w-md p-3 rounded-2xl ${msg.role === 'user' ? 'text-white rounded-br-none' : 'bg-yellow-500/10 text-dark-gold-gradient rounded-bl-none'}`}
+                                    <div className={`max-w-xs md:max-w-md p-3 rounded-2xl ${msg.role === 'user' ? 'text-white rounded-br-none' : 'bg-white text-[#b8860b] rounded-bl-none'}`}
                                         style={msg.role === 'user' ? {backgroundImage: goldenGradient} : {}}
                                     >
                                         <div className="flex items-start gap-2">
                                             {msg.role === 'model' && <RomanTempleIcon className="w-5 h-5 golden-text flex-shrink-0 mt-1" />}
-                                            <p className="whitespace-pre-wrap">{msg.text}{isLoading && msg.role === 'model' && index === messages.length -1 && <span className="inline-block w-2 h-4 bg-current ml-1 animate-ping"></span>}</p>
+                                            <p dir="auto" className="whitespace-pre-wrap text-start text-lg">{msg.text}{isLoading && msg.role === 'model' && index === messages.length -1 && <span className="inline-block w-2 h-4 bg-current ml-1 animate-ping"></span>}</p>
                                         </div>
                                     </div>
                                 </div>
@@ -187,12 +256,29 @@ const ChatSidebar: React.FC<ChatSidebarProps> = ({ isOpen, onClose, onGoHome, co
 
                         {/* Input Area */}
                         <div className="flex-shrink-0 p-4 border-t border-[var(--color-border-primary)] bg-[var(--color-background-primary)] no-print-sidebar">
+                            <input
+                                type="file"
+                                ref={fileInputRef}
+                                onChange={handleFileChange}
+                                className="sr-only"
+                                accept=".pdf,.doc,.docx,image/*"
+                            />
                             <form onSubmit={handleSendMessage} className="flex gap-2">
+                                <button
+                                    type="button"
+                                    onClick={triggerFileUpload}
+                                    disabled={isLoading}
+                                    className="p-3 text-white rounded-lg shadow hover:opacity-90 disabled:opacity-50 flex items-center justify-center"
+                                    style={{ backgroundImage: goldenGradient }}
+                                    aria-label="Attach file"
+                                >
+                                    <PlusIcon className="w-6 h-6" />
+                                </button>
                                 <input
                                     type="text"
                                     value={userInput}
                                     onChange={(e) => setUserInput(e.target.value)}
-                                    placeholder="Type your question here..."
+                                    placeholder="Ask an academic question or discuss the file..."
                                     disabled={isLoading}
                                     className="flex-grow p-3 bg-[var(--color-background-tertiary)] rounded-lg border border-yellow-800/30 focus:ring-2 focus:ring-yellow-600 transition text-dark-gold-gradient font-semibold"
                                 />

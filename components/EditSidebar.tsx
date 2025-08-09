@@ -266,7 +266,7 @@ const EditSidebar: React.FC<EditSidebarProps> = ({ isOpen, onGoHome, onClose }) 
                                     <ul className="space-y-1">
                                         {analysisResult.chapters.map(chapter => (
                                             <li key={chapter.id}>
-                                                <div onClick={() => setActiveChapterId(prev => prev === chapter.id ? null : chapter.id)} className="flex justify-between items-center w-full text-left p-2 rounded-md cursor-pointer hover:bg-yellow-500/10">
+                                                <div dir="auto" onClick={() => setActiveChapterId(prev => prev === chapter.id ? null : chapter.id)} className="flex justify-between items-center w-full text-start p-2 rounded-md cursor-pointer hover:bg-yellow-500/10">
                                                     <span className="font-semibold text-dark-gold-gradient">{chapter.title}</span>
                                                     <ChevronDownIcon className={`w-5 h-5 transition-transform ${activeChapterId === chapter.id ? 'rotate-180' : ''}`} />
                                                 </div>
@@ -274,7 +274,7 @@ const EditSidebar: React.FC<EditSidebarProps> = ({ isOpen, onGoHome, onClose }) 
                                                     <ul className="pl-4 mt-1 space-y-1 border-l-2 border-yellow-700/30">
                                                         {analysisResult.pageTexts.filter(p => p.pageNumber >= chapter.startPage && p.pageNumber <= chapter.endPage).map(page => (
                                                             <li key={page.pageNumber}>
-                                                                <button onClick={() => setSelectedPage(page)} className={`w-full text-left p-1.5 text-sm rounded-md ${selectedPage?.pageNumber === page.pageNumber ? 'bg-yellow-500/20 text-dark-gold-gradient font-bold' : 'text-gold-brown hover:bg-yellow-500/10'}`}>
+                                                                <button dir="auto" onClick={() => setSelectedPage(page)} className={`w-full text-start p-1.5 text-sm rounded-md ${selectedPage?.pageNumber === page.pageNumber ? 'bg-yellow-500/20 text-dark-gold-gradient font-bold' : 'text-gold-brown hover:bg-yellow-500/10'}`}>
                                                                     Page {page.pageNumber}
                                                                 </button>
                                                             </li>
@@ -294,7 +294,7 @@ const EditSidebar: React.FC<EditSidebarProps> = ({ isOpen, onGoHome, onClose }) 
                                     </div>
                                     <div className="max-h-48 overflow-y-auto space-y-2">
                                         {filteredBooks.length > 0 ? filteredBooks.map(b => (
-                                            <div key={b.id} className="p-2 bg-[var(--color-background-tertiary)] rounded-md text-sm">
+                                            <div key={b.id} dir="auto" className="p-2 bg-[var(--color-background-tertiary)] rounded-md text-sm">
                                                 <p className="font-semibold text-gold-brown truncate" title={b.name}>{b.name}</p>
                                                 <div className="flex gap-2 mt-1">
                                                     <button onClick={() => handleLoadBook(b)} className="flex-1 text-xs py-1 rounded text-white hover:opacity-90" style={{ backgroundImage: goldenGradient }}>View</button>
@@ -308,7 +308,7 @@ const EditSidebar: React.FC<EditSidebarProps> = ({ isOpen, onGoHome, onClose }) 
                             {/* Content Panel */}
                             <div className="flex-grow overflow-y-auto p-6 bg-[var(--color-background-primary)] printable-content" style={{ fontFamily: "'Times New Roman', serif" }}>
                                 {selectedPage ? (
-                                    <div id={`page-content-${selectedPage.pageNumber}`}>
+                                    <div id={`page-content-${selectedPage.pageNumber}`} dir="auto">
                                         <div className="flex justify-between items-center border-b border-[var(--color-border-primary)] pb-3 mb-4">
                                             <h3 className="text-2xl font-bold golden-text">Page {selectedPage.pageNumber}</h3>
                                             <div className="flex items-center gap-2 no-print-sidebar">

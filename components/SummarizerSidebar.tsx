@@ -281,7 +281,8 @@ const SummarizerSidebar: React.FC<SummarizerSidebarProps> = ({ isOpen, onGoHome,
                                                 <li key={chapter.id}>
                                                     <button 
                                                         onClick={() => handleSelectChapter(chapter)} 
-                                                        className={`flex justify-between items-center w-full text-left p-2 rounded-md cursor-pointer ${currentSummary?.chapterTitle === chapter.title ? 'bg-yellow-500/20 text-dark-gold-gradient font-bold' : 'text-gold-brown hover:bg-yellow-500/10'}`}
+                                                        dir="auto"
+                                                        className={`flex justify-between items-center w-full text-start p-2 rounded-md cursor-pointer ${currentSummary?.chapterTitle === chapter.title ? 'bg-yellow-500/20 text-dark-gold-gradient font-bold' : 'text-gold-brown hover:bg-yellow-500/10'}`}
                                                     >
                                                         <span className="font-semibold">{chapter.title}</span>
                                                     </button>
@@ -299,7 +300,7 @@ const SummarizerSidebar: React.FC<SummarizerSidebarProps> = ({ isOpen, onGoHome,
                                     </div>
                                     <div className="max-h-48 overflow-y-auto space-y-2">
                                         {filteredSummaries.length > 0 ? filteredSummaries.map(s => (
-                                            <div key={s.id} className="p-2 bg-[var(--color-background-tertiary)] rounded-md text-sm text-left">
+                                            <div key={s.id} dir="auto" className="p-2 bg-[var(--color-background-tertiary)] rounded-md text-sm text-start">
                                                 <p className="font-semibold text-gold-brown truncate" title={`${s.bookName} - ${s.chapterTitle}`}>
                                                     <span className="font-bold text-dark-gold-gradient">{s.chapterTitle}</span>
                                                     <span className="text-xs"> ({s.bookName})</span>
@@ -317,7 +318,7 @@ const SummarizerSidebar: React.FC<SummarizerSidebarProps> = ({ isOpen, onGoHome,
                                 {isSummarizing ? (
                                     <div className="flex items-center justify-center h-full"> <LoadingSpinner text="Generating summary..." /> </div>
                                 ) : currentSummary ? (
-                                    <div id="summary-content" style={{ fontFamily: "'Times New Roman', serif" }}>
+                                    <div id="summary-content" dir="auto" style={{ fontFamily: "'Times New Roman', serif" }}>
                                         <div className="flex justify-between items-center border-b border-[var(--color-border-primary)] pb-3 mb-4">
                                             <h3 className="text-2xl font-bold golden-text">Summary: {currentSummary.chapterTitle}</h3>
                                             <div className="flex items-center gap-2 no-print-sidebar">

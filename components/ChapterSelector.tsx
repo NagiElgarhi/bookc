@@ -1,3 +1,4 @@
+
 import React, { useState, useMemo } from 'react';
 import { Chapter, Lesson, PageText } from '../types';
 import { BookOpenIcon, SearchIcon, RomanTempleIcon } from './icons';
@@ -82,12 +83,12 @@ const ChapterSelector: React.FC<ChapterSelectorProps> = ({ chapters, pageTexts, 
               <div key={chapter.id} className="rounded-xl p-[2px] bg-gradient-to-br from-[#D4AF37]/50 to-[#6d4c11]/50 transition-all duration-300">
                 <div className="bg-[var(--color-background-secondary)]/80 rounded-[calc(0.75rem-2px)] p-4 text-left">
                 <div className="flex justify-between items-center gap-4 flex-wrap">
-                  <div className="flex-grow flex items-center gap-3">
+                  <div className="flex-grow flex items-center gap-3" dir="auto">
                     <button onClick={() => onTestChapter(chapter)} title={`Test me on: ${chapter.title}`} className="p-2 text-[var(--color-text-secondary)] hover:text-[var(--color-accent-primary)] transition-colors rounded-full hover:bg-[var(--color-accent-primary)]/10">
                         <RomanTempleIcon className="w-6 h-6"/>
                     </button>
                     <div>
-                      <h3 className="font-bold text-lg" style={{ color: 'var(--color-text-brown-dark)' }}>
+                      <h3 className="font-bold text-lg text-start" style={{ color: 'var(--color-text-brown-dark)' }}>
                         {chapter.title}
                       </h3>
                       <p className="text-sm mt-1" style={{ color: 'var(--color-text-green-dark)' }}>
@@ -118,8 +119,8 @@ const ChapterSelector: React.FC<ChapterSelectorProps> = ({ chapters, pageTexts, 
                     {chapter.lessons && chapter.lessons.length > 0 ? (
                       <ul className="space-y-2">
                         {chapter.lessons.map((lesson) => (
-                          <li key={lesson.id} className="flex flex-col sm:flex-row justify-between items-center gap-4 p-2 rounded-lg bg-[var(--color-background-tertiary)]/70">
-                            <div className="flex items-center gap-3 text-left">
+                          <li key={lesson.id} dir="auto" className="flex flex-col sm:flex-row justify-between items-center gap-4 p-2 rounded-lg bg-[var(--color-background-tertiary)]/70">
+                            <div className="flex items-center gap-3 text-start">
                               <BookOpenIcon className="w-5 h-5 text-gold-brown flex-shrink-0" />
                               <span className="font-medium text-sm" style={{color: 'var(--color-text-primary)'}}>{lesson.title}</span>
                             </div>
@@ -150,7 +151,7 @@ const ChapterSelector: React.FC<ChapterSelectorProps> = ({ chapters, pageTexts, 
             className="px-6 py-2 text-base font-semibold text-white rounded-lg hover:opacity-90 transition-colors"
             style={{ backgroundImage: 'linear-gradient(to bottom right, #c09a3e, #856a3d)' }}
           >
-            Back to Upload Another File
+            Back to upload another file
           </button>
         </div>
       </div>

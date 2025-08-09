@@ -276,7 +276,7 @@ const AskMeSidebar: React.FC<AskMeSidebarProps> = ({ isOpen, onClose, onGoHome }
                         {error && <p className="p-3 my-2 bg-yellow-500/10 text-dark-gold-gradient rounded-lg text-sm">{error}</p>}
                         {chapters?.length ? (
                             <ul className="space-y-2 max-h-[80vh] overflow-y-auto">
-                                {chapters.map(c => <li key={c.id}><button onClick={() => handleChapterSelect(c)} className="w-full text-left p-3 rounded-lg font-semibold text-dark-gold-gradient bg-[var(--color-background-tertiary)] hover:bg-yellow-500/10"><span>{c.title} (p. {c.startPage}-{c.endPage})</span></button></li>)}
+                                {chapters.map(c => <li key={c.id}><button dir="auto" onClick={() => handleChapterSelect(c)} className="w-full text-start p-3 rounded-lg font-semibold text-dark-gold-gradient bg-[var(--color-background-tertiary)] hover:bg-yellow-500/10"><span>{c.title} (p. {c.startPage}-{c.endPage})</span></button></li>)}
                             </ul>
                         ) : <p className="text-center text-dark-gold-gradient">No chapters found.</p>}
                         <button onClick={() => handleReset(true)} style={{ backgroundImage: goldenGradient }} className="mt-4 px-4 py-2 w-full text-white font-bold rounded-lg">Select another file</button>
@@ -284,7 +284,7 @@ const AskMeSidebar: React.FC<AskMeSidebarProps> = ({ isOpen, onClose, onGoHome }
                 );
             case 'qa':
                 return (
-                     <div className="flex-grow flex flex-col min-h-0 overflow-hidden printable-content">
+                     <div className="flex-grow flex flex-col min-h-0 printable-content">
                         <div className="flex-shrink-0 p-2 text-center border-b border-[var(--color-border-primary)] bg-[var(--color-background-tertiary)] no-print-sidebar">
                             <p className="text-sm font-bold golden-text">Now asking about: {activeChapterTitle}</p>
                         </div>
@@ -296,7 +296,7 @@ const AskMeSidebar: React.FC<AskMeSidebarProps> = ({ isOpen, onClose, onGoHome }
                                     >
                                         <div className="flex items-start gap-2">
                                             {msg.role === 'model' && <RomanTempleIcon className="w-5 h-5 golden-text flex-shrink-0 mt-1" />}
-                                            <p className="whitespace-pre-wrap">{msg.text}{isAnswering && msg.role === 'model' && index === messages.length - 1 && <span className="inline-block w-2 h-4 bg-current ml-1 animate-ping"></span>}</p>
+                                            <p dir="auto" className="whitespace-pre-wrap text-start">{msg.text}{isAnswering && msg.role === 'model' && index === messages.length - 1 && <span className="inline-block w-2 h-4 bg-current ml-1 animate-ping"></span>}</p>
                                         </div>
                                     </div>
                                 </div>

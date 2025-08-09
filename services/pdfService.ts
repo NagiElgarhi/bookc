@@ -1,3 +1,4 @@
+
 import { PageText } from '../types';
 
 declare const pdfjsLib: any;
@@ -11,7 +12,7 @@ if (typeof pdfjsLib !== 'undefined' && pdfjsLib.GlobalWorkerOptions) {
 export const extractTextPerPage = async (file: File): Promise<PageText[]> => {
   if (typeof pdfjsLib === 'undefined') {
     console.error("PDF.js library failed to load.");
-    throw new Error("PDF.js library failed to load. Please check your internet connection and try again.");
+    throw new Error("فشلت مكتبة قراءة ملفات PDF في التحميل. يرجى التحقق من اتصالك بالإنترنت والمحاولة مرة أخرى.");
   }
   
   const arrayBuffer = await file.arrayBuffer();
@@ -22,7 +23,24 @@ export const extractTextPerPage = async (file: File): Promise<PageText[]> => {
   for (let i = 1; i <= numPages; i++) {
     const page = await pdf.getPage(i);
     const textContent = await page.getTextContent();
-    const pageText = textContent.items.map((item: any) => item.str).join(' ');
+    
+    let lastY = -1;
+    const lines: string[] = [];
+    let currentLine = '';
+
+    // A simple heuristic to detect lines based on vertical position
+    for (const item of textContent.items) {
+        const currentY = item.transform[5];
+        if (lastY !== -1 && Math.abs(currentY - lastY) > 2) { // Use a small threshold for new line
+            lines.push(currentLine.trim());
+            currentLine = '';
+        }
+        currentLine += item.str + ' ';
+        lastY = currentY;
+    }
+    lines.push(currentLine.trim()); // Add the last line
+    
+    const pageText = lines.filter(line => line).join('\n'); // Join non-empty lines with a newline
     
     pagesContent.push({ pageNumber: i, text: pageText });
   }

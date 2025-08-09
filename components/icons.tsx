@@ -1,5 +1,6 @@
 
 
+
 import React from 'react';
 
 export const UploadIcon: React.FC<{ className?: string }> = ({ className }) => (
@@ -53,6 +54,12 @@ export const PrintIcon: React.FC<{ className?: string }> = ({ className }) => (
 export const HtmlIcon: React.FC<{ className?: string }> = ({ className }) => (
   <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
     <path d="M20,4H4A2,2,0,0,0,2,6V18a2,2,0,0,0,2,2H20a2,2,0,0,0,2-2V6A2,2,0,0,0,20,4ZM8.5,15.5H7l-1-2H4.5v2H3V9h4a2,2,0,0,1,2,2v1a2,2,0,0,1-2,2Zm-2-3.5H4.5v2h1ZM14,15.5H12.5v-2H11v2H9.5V9H11v2h1.5V9H14Zm5.5,0h-1l-.75-3.5L17,15.5H16l-.75-3.5L14.5,15.5h-1L15,9h1Z" />
+  </svg>
+);
+
+export const WordIcon: React.FC<{ className?: string }> = ({ className }) => (
+  <svg className={className} xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M20 4H4a2 2 0 00-2 2v12a2 2 0 002 2h16a2 2 0 002-2V6a2 2 0 00-2-2zM9.5 16.5l-1-2h-1v2h-1V9.5h2.5a1.5 1.5 0 010 3H9.5v1zm-2-2.5h1a.5.5 0 000-1h-1v1zm8.5 2.5h-1v-4l-1.5 4h-1l-1.5-4v4h-1V9.5h2.5l1 2.5 1-2.5h2.5v7z" />
   </svg>
 );
 
@@ -352,5 +359,11 @@ export const OliveIcon: React.FC<{ className?: string }> = ({ className }) => (
 export const MenuIcon: React.FC<{ className?: string }> = ({ className }) => (
     <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" stroke="currentColor">
         <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+);
+
+export const PlusIcon: React.FC<{ className?: string }> = ({ className }) => (
+    <svg className={className} xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24" strokeWidth={1.5} stroke="currentColor">
+      <path strokeLinecap="round" strokeLinejoin="round" d="M12 4.5v15m7.5-7.5h-15" />
     </svg>
 );

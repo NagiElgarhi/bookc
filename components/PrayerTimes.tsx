@@ -124,6 +124,7 @@ const PrayerTimes: React.FC<PrayerTimesProps> = ({ onGoHome }) => {
 
     return (
         <div 
+            dir="rtl"
             className="w-full max-w-lg rounded-2xl shadow-2xl flex flex-col p-4 border border-yellow-800/20"
             style={{ backgroundImage: 'var(--color-background-container-gradient)' }}
         >
