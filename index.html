@@ -1,0 +1,258 @@
+<!DOCTYPE html>
+<html lang="en" dir="ltr">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/vite.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Book Master</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Roboto:wght@400;500;700&display=swap" rel="stylesheet">
+    <link href="https://fonts.googleapis.com/css2?family=Cinzel+Decorative:wght@400;700;900&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.css" integrity="sha384-KiWOvVjnN8qwKMvhTr2lo9CowS2d_3XbDYxM3ETReKj8NQnR+ZfGceJ3wRSEdFun" crossorigin="anonymous">
+    <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.10/dist/katex.min.js" integrity="sha384-hIoBPJpTadBOWsNn+2G8wIeUoZhBCsflmuBnjIqcGySHLSROJjAQh5RkJvKLTbDw" crossorigin="anonymous"></script>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/mammoth@1.6.0/mammoth.browser.min.js"></script>
+    <style>
+      :root {
+        /* Default light theme fallback */
+        --color-background-primary: #ffffff;
+        --color-background-secondary: #f8f9fa;
+        --color-background-tertiary: #e9ecef;
+        --color-border-primary: #dee2e6;
+        --color-border-secondary: #ced4da;
+        --color-text-primary: #212529;
+        --color-text-secondary: #495057;
+        --color-text-tertiary: #6c757d;
+        --color-text-brown-dark: #343a40;
+        --color-text-green-dark: #285430;
+        --color-accent-primary: #b8860b;
+        --color-accent-secondary: #5a9a5d;
+        --color-accent-info: #0d6efd;
+        --color-accent-danger: #dc3545;
+        --color-accent-success: #198754;
+        --color-accent-indigo: #6610f2;
+        --color-accent-purple: #6f42c1;
+        --color-background-dots: rgba(0, 0, 0, 0.05);
+        --color-accent-highlight: #fff3cd;
+        --color-background-container-gradient: linear-gradient(145deg, #f8f9fa, #e9ecef);
+        --background-body: linear-gradient(to bottom, #343a40, #ffffff);
+      }
+      html {
+        min-height: 100%;
+        background-color: var(--color-background-primary);
+      }
+      body {
+        font-family: 'Roboto', sans-serif;
+        color: var(--color-text-primary);
+        min-height: 100%;
+        background: var(--background-body);
+        background-attachment: fixed;
+        background-repeat: no-repeat;
+      }
+      .dark {
+        --color-background-primary: #0d1b2a;
+        --color-background-secondary: #1b263b;
+        --color-background-tertiary: #2a364b;
+        --color-border-primary: #415a77;
+        --color-border-secondary: #778da9;
+        --color-text-primary: #f5f5f5;
+        --color-text-secondary: #e0e0e0;
+        --color-text-tertiary: #bdbdbd;
+        --color-text-brown-dark: #e0e0e0;
+        --color-text-green-dark: #a5d6a7;
+        --color-accent-primary: #FFC107;
+        --color-accent-secondary: #81C784;
+        --color-accent-info: #4FC3F7;
+        --color-accent-danger: #E57373;
+        --color-accent-success: #81C784;
+        --color-accent-indigo: #9575CD;
+        --color-accent-purple: #BA68C8;
+        --color-background-dots: rgba(255, 255, 255, 0.04);
+        --color-accent-highlight: rgba(255, 193, 7, 0.1);
+        --color-background-container-gradient: linear-gradient(145deg, #1b263b, #2a364b);
+        --background-body: linear-gradient(to bottom, #0d1b2a, #40e0d0);
+      }
+      .no-scrollbar::-webkit-scrollbar {
+          display: none;
+      }
+      .no-scrollbar {
+          -ms-overflow-style: none;
+          scrollbar-width: none;
+      }
+
+      .golden-text {
+        background-image: linear-gradient(to bottom right, #c09a3e, #856a3d);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      
+      .dark .golden-text {
+        background-image: linear-gradient(to right, var(--color-accent-primary), var(--color-text-secondary));
+      }
+
+      .text-wavy-dark-gold {
+        background-image: linear-gradient(110deg, #4a2c2a 20%, #d4af37 50%, #4a2c2a 80%);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        background-size: 250% auto;
+      }
+
+      .text-dark-gold-gradient {
+        background-image: linear-gradient(to bottom, #a1885b, #4a2c2a);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+      
+      .dark .text-dark-gold-gradient {
+         background-image: linear-gradient(to bottom, var(--color-text-secondary), var(--color-text-primary));
+      }
+
+      .text-book-gradient {
+        background-image: linear-gradient(to bottom right, #FBBF24, #262626);
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+      }
+
+      .text-gold-brown {
+        color: var(--color-text-secondary);
+      }
+      
+      .dark .text-gold-brown {
+         color: var(--color-text-tertiary);
+      }
+
+      .bg-dark-gold-gradient {
+        background-image: linear-gradient(145deg, #1a1a1a, #4a3a1a, #1a1a1a);
+      }
+      
+      .dark .bg-dark-gold-gradient {
+        background-image: linear-gradient(145deg, var(--color-background-secondary), var(--color-background-tertiary));
+      }
+
+      @keyframes shimmer {
+        from { background-position: 200% center; }
+        to { background-position: -200% center; }
+      }
+      .animate-shimmer {
+        animation: shimmer 7s linear infinite;
+      }
+      
+      @keyframes expand-from-center-shimmer {
+        0% { background-size: 0% 100%; }
+        50% { background-size: 200% 100%; }
+        100% { background-size: 0% 100%; }
+      }
+      .animate-expand-shimmer {
+        animation: expand-from-center-shimmer 3s ease-in-out infinite;
+      }
+
+      @keyframes bounce-down {
+        0%, 20%, 50%, 80%, 100% {
+          transform: translateY(0);
+        }
+        40% {
+          transform: translateY(10px);
+        }
+        60% {
+          transform: translateY(5px);
+        }
+      }
+      .animate-bounce-down {
+          animation: bounce-down 2.5s infinite;
+      }
+
+      @media print {
+        .no-print, aside, #app-background {
+          display: none !important;
+        }
+        html, body {
+          background-image: none !important;
+          background-color: #fff !important;
+        }
+        main {
+           display: block !important;
+           padding: 0 !important;
+           margin: 0 !important;
+        }
+        #printable-session {
+          border: none !important;
+          box-shadow: none !important;
+          padding: 0 !important;
+          margin: 0 !important;
+          background: none !important;
+          backdrop-filter: none !important;
+          color: black !important;
+          -webkit-print-color-adjust: exact;
+          print-color-adjust: exact;
+        }
+         #printable-session * {
+            color: black !important;
+            background-color: transparent !important;
+        }
+        /* New styles for question-only printing */
+        body.print-questions-only #printable-session > *:not(#questions-section-wrapper),
+        body.print-questions-only #questions-section-wrapper .no-print {
+            display: none !important;
+        }
+
+        /* New styles for sidebar printing */
+        body.printing-sidebar .no-print,
+        body.printing-sidebar main,
+        body.printing-sidebar header,
+        body.printing-sidebar footer,
+        body.printing-sidebar > div > aside:not(.is-printing) {
+            display: none !important;
+        }
+
+        body.printing-sidebar aside.is-printing {
+            display: block !important;
+            position: static !important;
+            width: 100% !important;
+            height: auto !important;
+            transform: none !important;
+            backdrop-filter: none !important;
+            background: none !important;
+            box-shadow: none !important;
+            border: none !important;
+        }
+
+        body.printing-sidebar aside.is-printing .printable-content {
+             padding: 0 !important;
+             margin: 0 !important;
+             background: none !important;
+             color: black !important;
+             -webkit-print-color-adjust: exact;
+             print-color-adjust: exact;
+        }
+        body.printing-sidebar aside.is-printing .printable-content * {
+            color: black !important;
+            background-color: transparent !important;
+        }
+        body.printing-sidebar aside.is-printing .no-print-sidebar {
+            display: none !important;
+        }
+      }
+    </style>
+  <script type="importmap">
+{
+  "imports": {
+    "react": "https://esm.sh/react@^19.1.0",
+    "react-dom/": "https://esm.sh/react-dom@^19.1.0/",
+    "react/": "https://esm.sh/react@^19.1.0/",
+    "@google/genai": "https://esm.sh/@google/genai@^0.14.0"
+  }
+}
+</script>
+<link rel="stylesheet" href="/index.css">
+</head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/index.tsx"></script>
+  </body>
+</html>
